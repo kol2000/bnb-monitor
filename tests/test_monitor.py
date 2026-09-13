@@ -120,6 +120,24 @@ class MonitorTests(unittest.TestCase):
         with patch('worker.rpc',side_effect=rpc), patch.object(worker.stop,'wait'):worker.check_once()
         self.assertEqual(self.client.get('/api/state').json['wallets'][0]['bnb'],'1.000000000000000001')
 
+    def test_shutdown_does_not_mark_unvisited_wallets_as_rpc_failures(self):
+        self.wallet()
+        self.post('wallets', {'wallets': [{'address': B, 'name': 'Second'}]})
+        mod.set_status(last_cycle=123, error=None)
+        def rpc(url, method, params):
+            if method == 'eth_chainId': return '0x38'
+            if method == 'eth_getBlockByNumber':
+                return {'number': '0x100', 'timestamp': hex(int(time.time()))}
+            return '0x7'
+        with patch('worker.rpc', side_effect=rpc), patch.object(worker.stop, 'wait', side_effect=lambda _: worker.stop.set()):
+            worker.check_once()
+        state = self.client.get('/api/state').json
+        self.assertTrue(all(w['error'] is None for w in state['wallets']))
+        self.assertEqual(sum(w['balance'] is not None for w in state['wallets']), 1)
+        self.assertEqual(state['status']['last_cycle'], 123)
+        self.assertIsNone(state['status']['error'])
+        self.assertFalse(state['status']['running'])
+
     def test_sweep_survives_provider_discarding_old_state(self):
         self.wallet()
         self.post('wallets', {'wallets': [{'address': B, 'name': 'Second'}]})
