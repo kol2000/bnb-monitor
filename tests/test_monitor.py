@@ -120,6 +120,29 @@ class MonitorTests(unittest.TestCase):
         with patch('worker.rpc',side_effect=rpc), patch.object(worker.stop,'wait'):worker.check_once()
         self.assertEqual(self.client.get('/api/state').json['wallets'][0]['bnb'],'1.000000000000000001')
 
+    def test_sweep_survives_provider_discarding_old_state(self):
+        self.wallet()
+        self.post('wallets', {'wallets': [{'address': B, 'name': 'Second'}]})
+        current_height = 256
+        def rpc(url, method, params):
+            if method == 'eth_chainId':
+                return '0x38'
+            if method == 'eth_getBlockByNumber':
+                return {'number': hex(current_height), 'timestamp': hex(int(time.time()))}
+            if int(params[1], 16) < current_height:
+                raise mod.RemoteError('not supported')
+            return '0x7'
+        def advance(_seconds):
+            nonlocal current_height
+            current_height += 100
+        with patch('worker.rpc', side_effect=rpc), patch.object(worker.stop, 'wait', side_effect=advance):
+            worker.check_once()
+        with mod.db() as c:
+            rows = c.execute('SELECT balance,block,error FROM wallets ORDER BY id').fetchall()
+        self.assertEqual([(r['balance'], r['block'], r['error']) for r in rows],
+                         [('7', 256, None), ('7', 356, None)])
+        self.assertEqual(self.events(), [])
+
     def test_fallback_and_stale_provider(self):
         self.wallet();self.post('settings',{'rpc_urls':['https://one.example','https://two.example']})
         def rpc(url,method,params):
