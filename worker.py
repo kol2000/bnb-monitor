@@ -73,6 +73,10 @@ def check_once():
                 last_error = str(exc) if isinstance(exc, RemoteError) else 'Некорректный ответ RPC.'
             if not remaining:
                 break
+        # SIGTERM during a deployment is not a failed RPC check. Preserve the
+        # unvisited wallets and the last completed cycle; finally clears running.
+        if stop.is_set():
+            return
         if remaining:
             with db() as c:
                 for wid in remaining:
