@@ -54,7 +54,8 @@ def check_once():
                         used = index + 1
                     except (RemoteError, ValueError, KeyError, TypeError) as exc:
                         last_error = str(exc) if isinstance(exc, RemoteError) else 'Некорректный ответ RPC.'
-                    stop.wait(0.1)
+                    # Pace public RPC requests: one second plus response time per wallet.
+                    stop.wait(1.0)
             except (RemoteError, ValueError, KeyError, TypeError) as exc:
                 last_error = str(exc) if isinstance(exc, RemoteError) else 'Некорректный ответ RPC.'
             if not remaining:
