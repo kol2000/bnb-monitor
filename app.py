@@ -16,6 +16,7 @@ from urllib.request import Request, urlopen
 
 from flask import Flask, jsonify, request, session, render_template
 from werkzeug.security import generate_password_hash, check_password_hash
+from prices import usd, SOURCE
 
 DATA = Path(os.environ.get('DATA_DIR', '/data'))
 DATA.mkdir(parents=True, exist_ok=True)
@@ -232,13 +233,19 @@ def state():
         wallets = [dict(r) for r in c.execute('SELECT * FROM wallets ORDER BY id DESC')]
         events = [dict(r) for r in c.execute('SELECT * FROM events ORDER BY id DESC LIMIT 200')]
         status = {r['key']: json.loads(r['value']) for r in c.execute('SELECT * FROM status')}
+    price = status.get('bnb_usd')
+    price_at = status.get('price_at')
+    price_stale = not price_at or time.time() - price_at > 900
     for w in wallets:
         w['bnb'] = bnb(w['balance']) if w['balance'] is not None else None
+        w['usd'] = usd(w['balance'], price)
     for e in events:
         e.update(delta_bnb=bnb(e['delta']), new_bnb=bnb(e['new']))
         e.pop('chat', None)
     total = sum(int(w['balance']) for w in wallets if w['balance'] is not None)
-    return {'wallets': wallets, 'events': events, 'settings': cfg, 'status': status, 'total': bnb(total)}
+    return {'wallets': wallets, 'events': events, 'settings': cfg, 'status': status, 'total': bnb(total),
+            'total_usd': usd(total, price), 'price': {'bnb_usd': price, 'updated': price_at,
+            'stale': price_stale, 'error': status.get('price_error'), 'source': SOURCE}}
 
 @app.post('/api/wallets')
 def add_wallets():

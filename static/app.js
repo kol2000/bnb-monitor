@@ -34,7 +34,7 @@ function compareWallets(a, b) {
 function renderWallets() {
  const wallets = [...walletRows].sort(compareWallets);
  $('wallet-empty').hidden=wallets.length>0;
- $('wallet-list').innerHTML=wallets.map(w=>`<tr><td><div class="name">${escapeHtml(w.name)}</div><small><a class="mono" title="${escapeHtml(w.address)}" href="https://bscscan.com/address/${w.address}" target="_blank" rel="noopener noreferrer">${short(w.address)} ↗</a> <button class="quiet" data-copy="${w.address}" title="Копировать адрес">⧉</button></small></td><td class="mono">${w.bnb===null?'—':escapeHtml(w.bnb)}</td><td><small>${escapeHtml(date(w.checked))}</small>${w.error?`<small class="negative">${escapeHtml(w.error)}</small>`:''}</td><td><input aria-label="Уведомления ${escapeHtml(w.name)}" type="checkbox" data-notify="${w.id}" ${w.notify?'checked':''}></td><td><button class="quiet" data-rename="${w.id}" data-name="${escapeHtml(w.name)}" title="Переименовать">✎</button><button class="quiet danger" data-delete="${w.id}" title="Удалить">×</button></td></tr>`).join('');
+ $('wallet-list').innerHTML=wallets.map(w=>`<tr><td><div class="name">${escapeHtml(w.name)}</div><small><a class="mono" title="${escapeHtml(w.address)}" href="https://bscscan.com/address/${w.address}" target="_blank" rel="noopener noreferrer">${short(w.address)} ↗</a> <button class="quiet" data-copy="${w.address}" title="Копировать адрес">⧉</button></small></td><td class="mono">${w.bnb===null?'—':escapeHtml(w.bnb)}</td><td class="mono">${escapeHtml(w.usd ?? '—')}</td><td><small>${escapeHtml(date(w.checked))}</small>${w.error?`<small class="negative">${escapeHtml(w.error)}</small>`:''}</td><td><input aria-label="Уведомления ${escapeHtml(w.name)}" type="checkbox" data-notify="${w.id}" ${w.notify?'checked':''}></td><td><button class="quiet" data-rename="${w.id}" data-name="${escapeHtml(w.name)}" title="Переименовать">✎</button><button class="quiet danger" data-delete="${w.id}" title="Удалить">×</button></td></tr>`).join('');
 }
 $('wallet-sort').value = walletSort;
 $('wallet-sort').addEventListener('change', e => {
@@ -48,6 +48,12 @@ async function refresh(){
  try{
  const d=await api('state');$('total').textContent=d.total;$('count').textContent=d.wallets.length;
  $('checked-count').textContent='С балансом: '+d.wallets.filter(w=>w.balance!==null).length+' из '+d.wallets.length;
+ $('total-usd').textContent=d.total_usd ? '≈ '+d.total_usd : 'USD —';
+ const quote=d.price;
+ $('price-status').textContent=quote.bnb_usd
+   ? '1 BNB ≈ $'+Number(quote.bnb_usd).toLocaleString('en-US',{maximumFractionDigits:2})+' · курс: '+date(quote.updated)+(quote.stale?' · УСТАРЕЛ':'')+(quote.error?' · '+quote.error:'')
+   : (quote.error || 'Ожидаем курс CoinMarketCap');
+ $('price-status').className='small '+(quote.stale || quote.error?'negative':'muted');
  const s=d.status, stale=!s.worker_seen||Date.now()/1000-s.worker_seen>180;
  const g=d.settings;
  $('google-key-status').textContent=g.google_key_set?'Ключ Google установлен на сервере.':'Ключ не установлен. Выполните configure_google.py на VM (инструкция в README).';

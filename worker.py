@@ -3,12 +3,23 @@ import threading
 import time
 from app import DATA, RemoteError, bnb, db, record_balance, rpc, settings, set_status, telegram
 from sheets_sync import sync_once
+from prices import fetch_quote
 
 stop = threading.Event()
 
 def heartbeat():
     (DATA / 'heartbeat').touch()
     set_status(worker_seen=time.time())
+
+def refresh_price():
+    try:
+        price, timestamp = fetch_quote()
+        if timestamp > time.time() + 300 or time.time() - timestamp > 900:
+            raise ValueError('Stale quote')
+        set_status(bnb_usd=price, price_at=timestamp, price_error=None)
+    except Exception:
+        # Preserve the previous quote and its original timestamp on any failure.
+        set_status(price_error='Не удалось обновить курс CoinMarketCap.')
 
 def check_once():
     cfg = settings()
@@ -111,12 +122,17 @@ def run():
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         next_check = 0
         next_sync = 0
+        next_price = 0
         previous_source = None
         while not stop.is_set():
             heartbeat()
             set_status(worker_seen=time.time())
             try:
                 cfg = settings()
+                if time.time() >= next_price:
+                    refresh_price()
+                    next_price = time.time() + 300
+                    heartbeat()
                 source = (cfg['sheets_enabled'], cfg['sheets_id'], cfg['sheets_tab'], cfg['sheets_interval'])
                 if source != previous_source:
                     next_sync = 0

@@ -290,3 +290,12 @@ python3 -m venv .venv
 - eth_getBalance: https://ethereum.org/developers/docs/apis/json-rpc/#eth_getbalance
 - Telegram Bot API: https://core.telegram.org/bots/api#sendmessage
 - Docker networking / firewall: https://docs.docker.com/engine/network/packet-filtering-firewalls/
+# Оценка в USD
+
+Панель показывает приблизительную стоимость каждого баланса и общей суммы в USD.
+Цена читается сервером со страницы https://coinmarketcap.com/currencies/bnb/ без API-ключа.
+Worker запрашивает её примерно раз в 300 секунд; длительный обход может отложить обновление.
+Показываются время котировки CoinMarketCap и ошибки обновления. Курс старше 15 минут
+помечается как устаревший. При сбое сохраняется последняя цена; до первого успешного
+получения USD отображается прочерком. Изменения разметки CMC могут потребовать обновления парсера.
+Суммы меньше цента отображаются как `< $0.01`. Уведомления по-прежнему зависят только от BNB.
