@@ -127,7 +127,10 @@ def record_balance(wallet_id, amount, block, cfg):
     with db() as c:
         c.execute('BEGIN IMMEDIATE')
         w = c.execute('SELECT * FROM wallets WHERE id=?', (wallet_id,)).fetchone()
-        if not w or (w['block'] is not None and block <= w['block']):
+        if not w or (w['block'] is not None and block < w['block']):
+            return
+        if block == w['block']:
+            c.execute('UPDATE wallets SET checked=?,error=NULL WHERE id=?', (time.time(), wallet_id))
             return
         now = time.time()
         if w['balance'] is not None and int(w['balance']) != amount:
@@ -289,6 +292,44 @@ def delete_wallet(wid):
         c.execute("UPDATE events SET delivery='cancelled' WHERE wallet_id=? AND delivery='pending'", (wid,))
         c.execute('DELETE FROM wallets WHERE id=?', (wid,))
     return {'ok': True}
+
+# Bound manual RPC traffic while the normal worker continues its sweep.
+manual_check_lock = threading.Lock()
+
+@app.post('/api/wallets/<int:wid>/check')
+def check_wallet(wid):
+    with db() as c:
+        w = c.execute('SELECT * FROM wallets WHERE id=?', (wid,)).fetchone()
+    if not w:
+        return jsonify(error='Кошелёк уже удалён. Обновите таблицу.'), 404
+    if not manual_check_lock.acquire(blocking=False):
+        return jsonify(error='Уже выполняется ручная проверка. Попробуйте через несколько секунд.'), 409
+    try:
+        cfg = settings()
+        last_error = 'RPC недоступен.'
+        for url in cfg['rpc_urls']:
+            try:
+                if int(rpc(url, 'eth_chainId', []), 16) != 56:
+                    raise RemoteError('RPC подключён не к BSC mainnet (chain ID 56).')
+                block = rpc(url, 'eth_getBlockByNumber', ['finalized', False])
+                if not isinstance(block, dict):
+                    raise RemoteError('RPC не поддерживает finalized. Укажите другой RPC.')
+                height = int(block['number'], 16)
+                if abs(time.time() - int(block['timestamp'], 16)) > 180:
+                    raise RemoteError('RPC отстаёт более чем на 3 минуты или часы сервера неверны.')
+                if w['block'] is not None and height < w['block']:
+                    raise RemoteError('RPC отстаёт от ранее проверенного блока.')
+                # Always read the balance, even when finalized has not advanced.
+                raw = rpc(url, 'eth_getBalance', [w['address'], hex(height)])
+                if not isinstance(raw, str) or not raw.startswith('0x'):
+                    raise RemoteError('RPC вернул некорректный баланс.')
+                record_balance(wid, int(raw, 16), height, cfg)
+                return {'ok': True}
+            except (RemoteError, ValueError, KeyError, TypeError) as exc:
+                last_error = str(exc) if isinstance(exc, RemoteError) else 'Некорректный ответ RPC.'
+        raise RemoteError(last_error)
+    finally:
+        manual_check_lock.release()
 
 @app.post('/api/settings')
 def save_settings():

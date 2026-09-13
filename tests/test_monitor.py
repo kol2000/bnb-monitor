@@ -171,6 +171,71 @@ class MonitorTests(unittest.TestCase):
         with patch('worker.rpc',side_effect=rpc), patch.object(worker.stop,'wait'):worker.check_once()
         self.assertEqual(self.client.get('/api/state').json['wallets'][0]['balance'],'1')
 
+    def test_manual_check_reads_same_block_and_clears_error(self):
+        wid = self.wallet()
+        mod.record_balance(wid, 7, 256, mod.settings())
+        with mod.db() as c:
+            c.execute("UPDATE wallets SET checked=1,error='old failure'")
+        with patch('app.rpc', side_effect=['0x38', {'number': '0x100', 'timestamp': hex(int(time.time()))}, '0x7']) as call:
+            self.assertEqual(self.post(f'wallets/{wid}/check', {}).status_code, 200)
+        self.assertEqual(call.call_args.args[1], 'eth_getBalance')
+        w = self.client.get('/api/state').json['wallets'][0]
+        self.assertGreater(w['checked'], 1)
+        self.assertIsNone(w['error'])
+        self.assertEqual(self.events(), [])
+
+    def test_manual_check_fallback_preserves_notification_rules(self):
+        cfg = self.configure_telegram()
+        wid = self.wallet()
+        mod.record_balance(wid, 1, 100, cfg)
+        self.post('settings', {'rpc_urls': ['https://one.example', 'https://two.example']})
+        with patch('app.rpc', side_effect=[mod.RemoteError('Unavailable'), '0x38',
+                   {'number': '0x101', 'timestamp': hex(int(time.time()))}, '0x9']):
+            self.assertEqual(self.post(f'wallets/{wid}/check', {}).status_code, 200)
+        self.assertEqual(self.events()[0]['delta'], '8')
+        self.assertEqual(self.events()[0]['delivery'], 'pending')
+        # An older in-flight worker result cannot undo the manual refresh.
+        mod.record_balance(wid, 3, 101, cfg)
+        self.assertEqual(self.client.get('/api/state').json['wallets'][0]['balance'], '9')
+        self.assertEqual(len(self.events()), 1)
+
+    def test_manual_check_failure_and_lock_cleanup(self):
+        wid = self.wallet()
+        mod.record_balance(wid, 777, 100, mod.settings())
+        with patch('app.rpc', return_value='0x1'):
+            self.assertEqual(self.post(f'wallets/{wid}/check', {}).status_code, 502)
+        self.assertFalse(mod.manual_check_lock.locked())
+        self.assertEqual(self.client.get('/api/state').json['wallets'][0]['balance'], '777')
+        self.assertEqual(self.events(), [])
+
+    def test_manual_check_auth_missing_wallet_and_busy(self):
+        wid = self.wallet()
+        path = f'/api/wallets/{wid}/check'
+        self.assertEqual(self.client.post(path, json={}).status_code, 403)
+        other = mod.app.test_client()
+        token = other.get('/api/session').json['csrf']
+        self.assertEqual(other.post(path, json={}, headers={'X-CSRF-Token': token}).status_code, 401)
+        with patch('app.rpc') as call:
+            self.assertEqual(self.post(f'wallets/{wid+1}/check', {}).status_code, 404)
+            with mod.manual_check_lock:
+                self.assertEqual(self.post(f'wallets/{wid}/check', {}).status_code, 409)
+            call.assert_not_called()
+
+    def test_manual_check_does_not_overwrite_newer_concurrent_result(self):
+        wid = self.wallet()
+        cfg = mod.settings()
+        mod.record_balance(wid, 1, 100, cfg)
+        def rpc(url, method, params):
+            if method == 'eth_chainId': return '0x38'
+            if method == 'eth_getBlockByNumber':
+                return {'number': '0x101', 'timestamp': hex(int(time.time()))}
+            mod.record_balance(wid, 9, 258, cfg)
+            return '0x7'
+        with patch('app.rpc', side_effect=rpc):
+            self.assertEqual(self.post(f'wallets/{wid}/check', {}).status_code, 200)
+        self.assertEqual(self.client.get('/api/state').json['wallets'][0]['balance'], '9')
+        self.assertEqual(len(self.events()), 1)
+
     def test_settings_validation(self):
         for data in ({'interval':1},{'rpc_urls':['http://example.com']},{'threshold':'NaN'},{'telegram_enabled':True}):
             self.assertEqual(self.post('settings',data).status_code,400)
