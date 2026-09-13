@@ -12,6 +12,37 @@ function showAuth(){$('login').hidden=loggedIn;$('dashboard').hidden=!loggedIn;$
 function escapeHtml(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 const date=t=>t?new Date(t*1000).toLocaleString('ru-RU'):'Ещё не проверен';
 const short=a=>a.slice(0,8)+'…'+a.slice(-6);
+
+const sortModes = ['balance-desc', 'balance-asc', 'name-asc', 'name-desc'];
+let walletSort = 'balance-desc', walletRows = [];
+try {
+  const saved = localStorage.getItem('bnb-monitor-wallet-sort');
+  if (sortModes.includes(saved)) walletSort = saved;
+} catch {}
+function compareWallets(a, b) {
+  const nameOrder = String(a.name || a.address).localeCompare(String(b.name || b.address), 'ru', {sensitivity:'base'});
+  const tie = nameOrder || a.address.localeCompare(b.address);
+  if (walletSort.startsWith('name-')) return walletSort === 'name-desc' ? -tie : tie;
+  if (a.balance == null || b.balance == null) {
+    if (a.balance == null && b.balance == null) return tie;
+    return a.balance == null ? 1 : -1;
+  }
+  const av = BigInt(a.balance), bv = BigInt(b.balance);
+  const order = av < bv ? -1 : av > bv ? 1 : 0;
+  return (walletSort === 'balance-desc' ? -order : order) || tie;
+}
+function renderWallets() {
+ const wallets = [...walletRows].sort(compareWallets);
+ $('wallet-empty').hidden=wallets.length>0;
+ $('wallet-list').innerHTML=wallets.map(w=>`<tr><td><div class="name">${escapeHtml(w.name)}</div><small><a class="mono" title="${escapeHtml(w.address)}" href="https://bscscan.com/address/${w.address}" target="_blank" rel="noopener noreferrer">${short(w.address)} ↗</a> <button class="quiet" data-copy="${w.address}" title="Копировать адрес">⧉</button></small></td><td class="mono">${w.bnb===null?'—':escapeHtml(w.bnb)}</td><td><small>${escapeHtml(date(w.checked))}</small>${w.error?`<small class="negative">${escapeHtml(w.error)}</small>`:''}</td><td><input aria-label="Уведомления ${escapeHtml(w.name)}" type="checkbox" data-notify="${w.id}" ${w.notify?'checked':''}></td><td><button class="quiet" data-rename="${w.id}" data-name="${escapeHtml(w.name)}" title="Переименовать">✎</button><button class="quiet danger" data-delete="${w.id}" title="Удалить">×</button></td></tr>`).join('');
+}
+$('wallet-sort').value = walletSort;
+$('wallet-sort').addEventListener('change', e => {
+  walletSort = e.target.value;
+  try { localStorage.setItem('bnb-monitor-wallet-sort', walletSort); } catch {}
+  renderWallets();
+});
+
 async function refresh(){
  if(!loggedIn||refreshing)return;refreshing=true;
  try{
@@ -28,8 +59,7 @@ async function refresh(){
  $('monitor-status').className='status-title '+(stale||s.error?'negative':'positive');
  $('last-check').textContent=s.last_cycle?'Цикл: '+date(s.last_cycle):'Ожидание первого цикла';
  $('rpc-error').hidden=!(stale||s.error);$('rpc-error').textContent=stale?'Фоновый процесс не отвечает. Проверьте: sudo docker compose ps и sudo docker compose logs worker':s.error;
- $('wallet-empty').hidden=d.wallets.length>0;
- $('wallet-list').innerHTML=d.wallets.map(w=>`<tr><td><div class="name">${escapeHtml(w.name)}</div><small><a class="mono" title="${escapeHtml(w.address)}" href="https://bscscan.com/address/${w.address}" target="_blank" rel="noopener noreferrer">${short(w.address)} ↗</a> <button class="quiet" data-copy="${w.address}" title="Копировать адрес">⧉</button></small></td><td class="mono">${w.bnb===null?'—':escapeHtml(w.bnb)}</td><td><small>${escapeHtml(date(w.checked))}</small>${w.error?`<small class="negative">${escapeHtml(w.error)}</small>`:''}</td><td><input aria-label="Уведомления ${escapeHtml(w.name)}" type="checkbox" data-notify="${w.id}" ${w.notify?'checked':''}></td><td><button class="quiet" data-rename="${w.id}" data-name="${escapeHtml(w.name)}" title="Переименовать">✎</button><button class="quiet danger" data-delete="${w.id}" title="Удалить">×</button></td></tr>`).join('');
+ walletRows=d.wallets;renderWallets();
  const delivery={pending:'В очереди',sent:'Отправлено',off:'Не требуется',cancelled:'Отменено'};
  $('event-empty').hidden=d.events.length>0;
  $('event-list').innerHTML=d.events.map(e=>`<tr><td>${escapeHtml(date(e.created))}<small>${escapeHtml(e.name)} · ${short(e.address)}</small></td><td class="mono ${e.delta.startsWith('-')?'negative':'positive'}">${e.delta.startsWith('-')?'':'+'}${escapeHtml(e.delta_bnb)}</td><td class="mono">${escapeHtml(e.new_bnb)}</td><td><a href="https://bscscan.com/block/${e.block}" target="_blank" rel="noopener noreferrer">${e.block} ↗</a></td><td>${delivery[e.delivery]||escapeHtml(e.delivery)}${e.delivery_error?`<small class="negative">${escapeHtml(e.delivery_error)} · попыток: ${e.attempts}</small>`:''}</td></tr>`).join('');
