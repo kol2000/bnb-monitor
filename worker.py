@@ -29,17 +29,19 @@ def check_once():
                 heartbeat()
                 if int(rpc(url, 'eth_chainId', []), 16) != 56:
                     raise RemoteError('RPC подключён не к BSC mainnet (chain ID 56).')
-                block = rpc(url, 'eth_getBlockByNumber', ['finalized', False])
-                if not isinstance(block, dict):
-                    raise RemoteError('RPC не поддерживает finalized. Укажите другой RPC.')
-                height = int(block['number'], 16)
-                if abs(time.time() - int(block['timestamp'], 16)) > 180:
-                    raise RemoteError('RPC отстаёт более чем на 3 минуты или часы сервера неверны.')
                 for wid, w in list(remaining.items()):
                     if stop.is_set():
                         break
                     heartbeat()
                     try:
+                        # Public RPCs may discard old state during a long wallet sweep.
+                        # Keep the balance tied to an explicit, freshly finalized height.
+                        block = rpc(url, 'eth_getBlockByNumber', ['finalized', False])
+                        if not isinstance(block, dict):
+                            raise RemoteError('RPC не поддерживает finalized. Укажите другой RPC.')
+                        height = int(block['number'], 16)
+                        if abs(time.time() - int(block['timestamp'], 16)) > 180:
+                            raise RemoteError('RPC отстаёт более чем на 3 минуты или часы сервера неверны.')
                         if w['block'] is not None and height < w['block']:
                             raise RemoteError('RPC отстаёт от ранее проверенного блока.')
                         if w['block'] is not None and height == w['block']:
