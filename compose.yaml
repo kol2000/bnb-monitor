@@ -1,7 +1,6 @@
 name: bnb-monitor
 x-common: &common
   image: bnb-monitor:1.1.0
-  build: .
   env_file: .env
   volumes:
     - monitor-data:/data
@@ -21,6 +20,7 @@ x-common: &common
 services:
   web:
     <<: *common
+    build: .
     ports:
       - "${BIND_IP:-127.0.0.1}:${PORT:-8080}:8080"
     healthcheck:
@@ -30,6 +30,10 @@ services:
       retries: 3
   worker:
     <<: *common
+    pull_policy: never
+    depends_on:
+      web:
+        condition: service_healthy
     command: ["python", "worker.py"]
     healthcheck:
       test: ["CMD", "python", "-c", "import os,time; assert time.time()-os.path.getmtime('/data/heartbeat')<180"]
