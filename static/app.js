@@ -15,10 +15,19 @@ const short=a=>a.slice(0,8)+'…'+a.slice(-6);
 
 const sortModes = ['balance-desc', 'balance-asc', 'name-asc', 'name-desc'];
 let walletSort = 'balance-desc', walletRows = [];
+let hideSmallBalances = false;
 try {
   const saved = localStorage.getItem('bnb-monitor-wallet-sort');
   if (sortModes.includes(saved)) walletSort = saved;
+  hideSmallBalances = localStorage.getItem('bnb-monitor-hide-small-balances') === 'true';
 } catch {}
+function matchesBalanceFilter(w) {
+  if (!hideSmallBalances) return true;
+  // The server marks positive amounts below one cent before rounding USD.
+  // Unknown balances/quotes cannot establish that a wallet meets the threshold.
+  return w.balance != null && BigInt(w.balance) > 0n
+    && typeof w.usd === 'string' && w.usd.startsWith('$') && w.usd !== '$0.00';
+}
 function compareWallets(a, b) {
   const nameOrder = String(a.name || a.address).localeCompare(String(b.name || b.address), 'ru', {sensitivity:'base'});
   const tie = nameOrder || a.address.localeCompare(b.address);
@@ -32,11 +41,19 @@ function compareWallets(a, b) {
   return (walletSort === 'balance-desc' ? -order : order) || tie;
 }
 function renderWallets() {
- const wallets = [...walletRows].sort(compareWallets);
- $('wallet-empty').hidden=wallets.length>0;
+ const wallets = walletRows.filter(matchesBalanceFilter).sort(compareWallets);
+ $('wallet-empty').hidden=walletRows.length>0;
+ $('wallet-filter-empty').hidden=walletRows.length===0 || wallets.length>0;
+ $('wallet-visible-count').textContent=hideSmallBalances?'Показано: '+wallets.length+' из '+walletRows.length:'';
  $('wallet-list').innerHTML=wallets.map(w=>`<tr><td><div class="name">${escapeHtml(w.name)}</div><small><a class="mono" title="${escapeHtml(w.address)}" href="https://bscscan.com/address/${w.address}" target="_blank" rel="noopener noreferrer">${short(w.address)} ↗</a> <button class="quiet" data-copy="${w.address}" title="Копировать адрес">⧉</button></small></td><td class="mono">${w.bnb===null?'—':escapeHtml(w.bnb)}</td><td class="mono">${escapeHtml(w.usd ?? '—')}</td><td><small>${escapeHtml(date(w.checked))}</small>${w.error?`<small class="negative">${escapeHtml(w.error)}</small>`:''}</td><td><input aria-label="Уведомления ${escapeHtml(w.name)}" type="checkbox" data-notify="${w.id}" ${w.notify?'checked':''}></td><td><button class="quiet" data-rename="${w.id}" data-name="${escapeHtml(w.name)}" title="Переименовать">✎</button><button class="quiet danger" data-delete="${w.id}" title="Удалить">×</button></td></tr>`).join('');
 }
 $('wallet-sort').value = walletSort;
+$('hide-small-balances').checked = hideSmallBalances;
+$('hide-small-balances').addEventListener('change', e => {
+  hideSmallBalances = e.target.checked;
+  try { localStorage.setItem('bnb-monitor-hide-small-balances', String(hideSmallBalances)); } catch {}
+  renderWallets();
+});
 $('wallet-sort').addEventListener('change', e => {
   walletSort = e.target.value;
   try { localStorage.setItem('bnb-monitor-wallet-sort', walletSort); } catch {}

@@ -26,7 +26,9 @@
           <option value="name-desc">Имя: Я → А / Z → A</option>
         </select>
       </label>
-      <div class="table-wrap card"><table><thead><tr><th>Кошелёк / адрес</th><th>Баланс BNB</th><th>≈ USD</th><th>Проверка</th><th>Telegram</th><th></th></tr></thead><tbody id="wallet-list"></tbody></table><div id="wallet-empty" class="empty"><div class="empty-icon">◇</div><h2>Начните с первого кошелька</h2><p>Добавьте публичный BSC-адрес выше.<br>Баланс появится после ближайшей проверки.</p></div></div>
+      <label class="check-label"><input id="hide-small-balances" type="checkbox"> Только кошельки с балансом от $0.01</label>
+      <p id="wallet-visible-count" class="muted small" aria-live="polite"></p>
+      <div class="table-wrap card"><table><thead><tr><th>Кошелёк / адрес</th><th>Баланс BNB</th><th>≈ USD</th><th>Проверка</th><th>Telegram</th><th></th></tr></thead><tbody id="wallet-list"></tbody></table><div id="wallet-empty" class="empty"><div class="empty-icon">◇</div><h2>Начните с первого кошелька</h2><p>Добавьте публичный BSC-адрес выше.<br>Баланс появится после ближайшей проверки.</p></div><div id="wallet-filter-empty" class="empty" hidden>Нет кошельков с известным балансом от $0.01. Отключите фильтр, чтобы увидеть все адреса.</div></div>
     </section>
     <section id="tab-history" hidden><div class="section-heading"><h2>Последние 200 изменений</h2><p class="muted small">Время отображается в часовом поясе вашего браузера.</p></div><div class="table-wrap card"><table><thead><tr><th>Время / кошелёк</th><th>Изменение BNB</th><th>Новый баланс</th><th>Блок</th><th>Уведомление</th></tr></thead><tbody id="event-list"></tbody></table><div id="event-empty" class="empty">Изменений пока нет. Начальный баланс в историю не записывается.</div></div></section>
     <section id="tab-settings" hidden>
