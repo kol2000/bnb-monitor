@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>BNB Monitor — кошельки</title><link rel="stylesheet" href="/static/style.css"><link rel="stylesheet" href="/static/google.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+<header><div class="brand"><span class="logo">B</span><div>BNB Monitor<small>Личный мониторинг кошельков</small></div></div><div class="header-right"><span class="network">● BSC MAINNET · 56</span><button id="logout" class="quiet" hidden>Выйти</button></div></header>
+<main>
+  <section id="login" class="login card" hidden><p class="eyebrow">ВАШИ КОШЕЛЬКИ ПОД КОНТРОЛЕМ</p><h1>Добро пожаловать</h1><p class="muted">Введите пароль, заданный при установке.</p><form id="login-form"><label>Пароль<input id="password" type="password" autocomplete="current-password" required></label><button type="submit">Войти в панель →</button></form><p class="muted small">Только публичные адреса. Приложению не нужны ключи от кошельков.</p></section>
+  <div id="dashboard" hidden>
+    <div class="page-title"><div><p class="eyebrow">ОБЗОР АКТИВОВ</p><h1>Мои кошельки</h1><p class="muted">Нативный BNB в сети BNB Smart Chain</p></div><button id="check" class="secondary">↻ Проверить сейчас</button></div>
+    <div class="stats"><section class="card"><span class="muted">Общий баланс</span><div class="balance" id="total">—</div><small>BNB · по последним успешным проверкам</small></section><section class="card"><span class="muted">Адресов в списке</span><div class="balance" id="count">0</div><small id="checked-count">Ожидают проверки</small></section><section class="card"><span class="muted">Состояние мониторинга</span><div class="status-title" id="monitor-status">Ожидание</div><small id="last-check">—</small></section></div>
+    <div id="rpc-error" class="warning" hidden></div>
+    <p class="notice">ⓘ Отслеживаем <strong>изменение баланса</strong>, не каждую транзакцию. Поступление и списание между проверками могут взаимно скрыться. Первый баланс — точка отсчёта, без уведомления.</p>
+    <nav class="tabs"><button class="tab active" data-tab="wallets">Кошельки</button><button class="tab" data-tab="history">История изменений</button><button class="tab" data-tab="settings">Настройки</button></nav>
+    <section id="tab-wallets">
+      <div class="card add-card"><div><h2>Добавить кошельки</h2><p class="muted small">Один адрес на строку. Можно добавить название через пробел.</p></div><form id="wallet-form"><textarea id="addresses" rows="3" placeholder="0x… Основной кошелёк&#10;0x… Резервный" required spellcheck="false"></textarea><button type="submit">+ Добавить адреса</button></form></div>
+      <div class="table-wrap card"><table><thead><tr><th>Кошелёк / адрес</th><th>Баланс BNB</th><th>Проверка</th><th>Telegram</th><th></th></tr></thead><tbody id="wallet-list"></tbody></table><div id="wallet-empty" class="empty"><div class="empty-icon">◇</div><h2>Начните с первого кошелька</h2><p>Добавьте публичный BSC-адрес выше.<br>Баланс появится после ближайшей проверки.</p></div></div>
+    </section>
+    <section id="tab-history" hidden><div class="section-heading"><h2>Последние 200 изменений</h2><p class="muted small">Время отображается в часовом поясе вашего браузера.</p></div><div class="table-wrap card"><table><thead><tr><th>Время / кошелёк</th><th>Изменение BNB</th><th>Новый баланс</th><th>Блок</th><th>Уведомление</th></tr></thead><tbody id="event-list"></tbody></table><div id="event-empty" class="empty">Изменений пока нет. Начальный баланс в историю не записывается.</div></div></section>
+    <section id="tab-settings" hidden>
+      <div class="card google-card"><p class="eyebrow">ИСТОЧНИК КОШЕЛЬКОВ</p><h2>Google Таблицы</h2>
+      <form id="google-form"><label class="check-label"><input id="sheets-enabled" type="checkbox"> Автоматически получать кошельки из таблицы</label>
+      <div class="settings-grid"><label>Ссылка или ID таблицы<input id="sheets-id" placeholder="https://docs.google.com/spreadsheets/d/…" spellcheck="false"></label><label>Название вкладки<input id="sheets-tab" value="Кошельки" required maxlength="100"></label></div>
+      <label>Интервал синхронизации, секунды<input id="sheets-interval" type="number" min="60" max="86400" value="300" required></label>
+      <p class="muted small">Столбец A — имя/email, B — BSC-адрес. Новые адреса добавляются, имена обновляются. Удалённые из таблицы адреса остаются в мониторинге. Если удалить кошелёк только в панели, синхронизация добавит его снова.</p>
+      <p id="google-key-status" class="muted small"></p><p id="google-status" class="small"></p>
+      <div class="save-bar"><button type="submit">Сохранить Google</button><button type="button" class="secondary" id="google-sync">Синхронизировать сейчас</button></div></form></div>
+      <form id="settings-form"><div class="settings-grid"><div class="card"><p class="eyebrow">ПОДКЛЮЧЕНИЕ К СЕТИ</p><h2>Проверки балансов</h2><label>Интервал, секунды<input id="interval" type="number" min="10" max="3600" required></label><label>RPC URL — по одному на строку<textarea id="rpc-urls" rows="4" required spellcheck="false"></textarea></label><p class="muted small">HTTPS, BSC mainnet (56), поддержка finalized. При ошибке используются следующие адреса. Публичные RPC имеют лимиты; большой список требует собственной квоты. Интервал отсчитывается после окончания цикла.</p><label>Минимальный прирост для Telegram, BNB<input id="threshold" type="text" inputmode="decimal" required></label><p class="muted small">0 — уведомлять о любом положительном изменении. Мелкие изменения не суммируются для достижения порога. WBNB и другие токены не отслеживаются.</p></div>
+      <div class="card"><p class="eyebrow">УВЕДОМЛЕНИЯ</p><h2>Telegram</h2><label class="check-label"><input id="telegram-enabled" type="checkbox"> Включить уведомления о приросте</label><label>Токен бота<input id="telegram-token" type="password" autocomplete="new-password" placeholder="123456:…"></label><p id="token-hint" class="muted small"></p><label class="check-label"><input id="clear-token" type="checkbox"> Удалить сохранённый токен</label><label>Ваш Chat ID<input id="telegram-chat" placeholder="123456789" inputmode="text"></label><p class="muted small">Создайте бота через @BotFather, откройте чат с вашим ботом и нажмите Start. Введите числовой Chat ID. Сначала сохраните настройки, затем отправьте тест.</p><button id="telegram-test" type="button" class="secondary">Отправить тестовое сообщение</button><p class="muted small">Выключение Telegram отменяет ожидающие сообщения. Токен хранится в базе на вашей VM; берегите резервные копии.</p></div></div><div class="save-bar"><span class="muted small">Изменения применятся при следующем цикле.</span><button type="submit">Сохранить настройки</button></div></form>
+    </section>
+    <footer>BNB Monitor 1.1 · Только чтение · Панель для локальной сети / VPN</footer>
+  </div>
+  <div id="toast" role="status" hidden></div>
+</main>
+</body></html>

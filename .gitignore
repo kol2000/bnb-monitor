@@ -1,0 +1,10 @@
+.env
+data/
+__pycache__/
+.venv/
+*.db*
+*.json
+secrets/
+credentials/
+*.pem
+*.key

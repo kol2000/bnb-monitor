@@ -1,0 +1,12 @@
+.env
+__pycache__
+tests
+*.zip
+data
+.venv
+*.json
+secrets
+credentials
+*.pem
+*.key
+.git
