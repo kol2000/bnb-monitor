@@ -1,9 +1,11 @@
+import json
+from decimal import Decimal, InvalidOperation
 import signal
 import threading
 import time
 from app import DATA, RemoteError, bnb, db, record_balance, rpc, settings, set_status, telegram
 from sheets_sync import sync_once
-from prices import fetch_quote
+from prices import fetch_quote, usd
 
 stop = threading.Event()
 
@@ -86,6 +88,23 @@ def check_once():
     finally:
         set_status(running=False)
 
+def notification_usd(delta):
+    """Use the cached quote at delivery time; missing USD must not block BNB alerts."""
+    with db() as c:
+        rows = c.execute("SELECT key,value FROM status WHERE key IN ('bnb_usd','price_at')").fetchall()
+    try:
+        quote = {r['key']: json.loads(r['value']) for r in rows}
+        price = Decimal(str(quote.get('bnb_usd')))
+        timestamp = float(quote.get('price_at'))
+        now = time.time()
+        if not price.is_finite() or price <= 0 or not 0 < timestamp <= now + 300:
+            raise ValueError('Invalid cached quote')
+        amount = usd(delta, str(price))
+        stale = ', курс устарел' if now - timestamp > 900 else ''
+        return f" (≈ {amount}{stale})"
+    except (ValueError, TypeError, InvalidOperation):
+        return ' (USD: курс недоступен)'
+
 def deliver():
     cfg = settings()
     if not cfg['telegram_enabled']:
@@ -106,7 +125,7 @@ def deliver():
                 continue
         text = (f"🟢 Увеличение баланса BNB · событие #{e['id']}\n"
                 f"{e['name']}\n{e['address']}\n\n"
-                f"Изменение: +{bnb(e['delta'])} BNB\nБаланс: {bnb(e['new'])} BNB\n"
+                f"Изменение: +{bnb(e['delta'])} BNB{notification_usd(e['delta'])}\nБаланс: {bnb(e['new'])} BNB\n"
                 f"Блок: {e['block']}\nhttps://bscscan.com/address/{e['address']}\n\n"
                 'Это разница балансов между проверками, не сумма отдельной транзакции.')
         try:

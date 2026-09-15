@@ -93,6 +93,32 @@ class MonitorTests(unittest.TestCase):
             self.assertEqual(send.call_count,1)
         self.assertEqual(self.events()[0]['delivery'],'sent')
 
+    def test_delivery_includes_usd_change_and_preserves_bnb(self):
+        cases = [
+            ('fresh', '1000', 0, 276320000000000, '(≈ $0.28)'),
+            ('dust', '1000', 0, 1, '(≈ < $0.01)'),
+            ('missing', None, None, 276320000000000, '(USD: курс недоступен)'),
+            ('stale', '1000', 901, 276320000000000, '(≈ $0.28, курс устарел)'),
+            ('invalid', 'NaN', 0, 276320000000000, '(USD: курс недоступен)'),
+            ('no timestamp', '1000', None, 276320000000000, '(USD: курс недоступен)'),
+        ]
+        for label, price, age, delta, expected in cases:
+            with self.subTest(label=label):
+                self.setUp()
+                cfg = self.configure_telegram()
+                wid = self.wallet()
+                mod.record_balance(wid, 10**18, 100, cfg)
+                mod.record_balance(wid, 10**18 + delta, 101, cfg)
+                now = time.time()
+                mod.set_status(bnb_usd=price, price_at=now - age if age is not None else None)
+                with patch('worker.time.time', return_value=now), patch('worker.telegram') as send, patch.object(worker.stop, 'wait'):
+                    worker.deliver()
+                send.assert_called_once()
+                text = send.call_args.args[1]
+                self.assertIn(f"Изменение: +{mod.bnb(delta)} BNB {expected}\n", text)
+                self.assertIn(f"Баланс: {mod.bnb(10**18 + delta)} BNB\n", text)
+                self.assertEqual(self.events()[0]['delivery'], 'sent')
+
     def test_disable_cancels_queue_and_token_is_hidden(self):
         cfg=self.configure_telegram();wid=self.wallet()
         mod.record_balance(wid,0,100,cfg);mod.record_balance(wid,1,101,cfg)
