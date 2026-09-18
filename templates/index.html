@@ -6,7 +6,7 @@
   <script src="/static/app.js" defer></script>
 </head>
 <body>
-<header><div class="brand"><span class="logo">B</span><div>BNB Monitor<small>Личный мониторинг кошельков</small></div></div><div class="header-right"><span class="network">● BSC MAINNET · 56</span><button id="logout" class="quiet" hidden>Выйти</button></div></header>
+<header><div class="brand"><span class="logo">B</span><div>BNB Monitor<small>Личный мониторинг кошельков</small></div></div><div class="header-right"><select id="theme-select" class="theme-select" aria-label="Тема оформления"><option value="dark">☾ Тёмная</option><option value="light">☀ Светлая</option></select><span class="network">● BSC MAINNET · 56</span><button id="logout" class="quiet" hidden>Выйти</button></div></header>
 <main>
   <section id="login" class="login card" hidden><p class="eyebrow">ВАШИ КОШЕЛЬКИ ПОД КОНТРОЛЕМ</p><h1>Добро пожаловать</h1><p class="muted">Введите пароль, заданный при установке.</p><form id="login-form"><label>Пароль<input id="password" type="password" autocomplete="current-password" required></label><button type="submit">Войти в панель →</button></form><p class="muted small">Только публичные адреса. Приложению не нужны ключи от кошельков.</p></section>
   <div id="dashboard" hidden>
