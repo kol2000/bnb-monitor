@@ -1,4 +1,20 @@
 'use strict';
+// Theme preference belongs to this browser, not the server configuration.
+(function () {
+  const picker = document.getElementById('theme-select');
+  function applyTheme(value) {
+    const theme = value === 'light' ? 'light' : 'dark';
+    document.documentElement.dataset.theme = theme;
+    picker.value = theme;
+  }
+  let saved = 'dark';
+  try { saved = localStorage.getItem('bnb-monitor-theme') || 'dark'; } catch {}
+  applyTheme(saved);
+  picker.addEventListener('change', () => {
+    applyTheme(picker.value);
+    try { localStorage.setItem('bnb-monitor-theme', picker.value); } catch {}
+  });
+})();
 const $ = id => document.getElementById(id);
 let csrf = '', loadedSettings = false, loadedGoogle = false, loggedIn = false, refreshing = false;
 let toastTimer;
