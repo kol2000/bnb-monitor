@@ -92,7 +92,10 @@ async function refresh(){
  const g=d.settings;
  $('google-key-status').textContent=g.google_key_set?'Ключ Google установлен на сервере.':'Ключ не установлен. Выполните configure_google.py на VM (инструкция в README).';
  $('google-status').textContent=s.sheets_error?'Ошибка: '+s.sheets_error:s.sheets_success?'Последняя синхронизация: '+date(s.sheets_success)+' · адресов: '+s.sheets_counts.valid+' · добавлено: '+s.sheets_counts.added+' · переименовано: '+s.sheets_counts.renamed+' · неверных строк: '+s.sheets_counts.invalid:'Синхронизации ещё не было.';
- $('google-status').className='small '+(s.sheets_error?'negative':'muted');
+
+ if(s.sheets_export_error) $('google-status').textContent+=' · Запись BNB: '+s.sheets_export_error;
+ else if(s.sheets_export_success) $('google-status').textContent+=' · Балансы записаны: '+date(s.sheets_export_success)+' · ячеек: '+s.sheets_export_count;
+ $('google-status').className='small '+(s.sheets_error||s.sheets_export_error?'negative':'muted');
  if(!loadedGoogle){$('sheets-enabled').checked=g.sheets_enabled;$('sheets-id').value=g.sheets_id;$('sheets-tab').value=g.sheets_tab;$('sheets-interval').value=g.sheets_interval;loadedGoogle=true;}
  // A long wallet scan updates the heartbeat file, but worker_seen is also refreshed during scans.
  $('monitor-status').textContent=stale?'Нет связи с монитором':s.running?'Проверяем…':s.error?'Ошибка RPC':'Работает';

@@ -4,7 +4,7 @@ import signal
 import threading
 import time
 from app import DATA, RemoteError, bnb, db, record_balance, rpc, settings, set_status, telegram
-from sheets_sync import sync_once
+from sheets_sync import sync_once, export_balances
 from prices import fetch_quote, usd
 
 stop = threading.Event()
@@ -169,7 +169,10 @@ def run():
                 with db() as c:
                     row = c.execute("SELECT value FROM status WHERE key='check_requested'").fetchone()
                 if time.time() >= next_check or (row and row['value'] == 'true'):
+                    cycle_started = time.time()
                     check_once()
+                    if not stop.is_set():
+                        export_balances(cycle_started)
                     next_check = time.time() + settings()['interval']
                 deliver()
             except Exception:
