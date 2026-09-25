@@ -1,3 +1,4 @@
+let loadedEmail=false;
 'use strict';
 // Theme preference belongs to this browser, not the server configuration.
 (function () {
@@ -103,9 +104,18 @@ async function refresh(){
  $('last-check').textContent=s.last_cycle?'Цикл: '+date(s.last_cycle):'Ожидание первого цикла';
  $('rpc-error').hidden=!(stale||s.error);$('rpc-error').textContent=stale?'Фоновый процесс не отвечает. Проверьте: sudo docker compose ps и sudo docker compose logs worker':s.error;
  walletRows=d.wallets;renderWallets();
+ const ec=d.settings;
+ if(!loadedEmail){
+  $('email-enabled').checked=ec.email_enabled;
+  for(const key of ['smtp_host','smtp_port','smtp_security','smtp_username','email_from','email_to']) $(key.replaceAll('_','-')).value=ec[key];
+  $('smtp-password-hint').textContent=ec.smtp_password_set?'Пароль сохранён. Пустое поле оставит его без изменений.':'Пароль ещё не задан.';
+  loadedEmail=true;
+ }
+ $('email-status').textContent=s.email_error || (s.email_last_sent?'Последнее письмо принято SMTP: '+date(s.email_last_sent):'Писем пока не отправлено');
+ $('email-status').className='small '+(s.email_error?'negative':'muted');
  const delivery={pending:'В очереди',sent:'Отправлено',off:'Не требуется',cancelled:'Отменено'};
  $('event-empty').hidden=d.events.length>0;
- $('event-list').innerHTML=d.events.map(e=>`<tr><td>${escapeHtml(date(e.created))}<small>${escapeHtml(e.name)} · ${short(e.address)}</small></td><td class="mono ${e.delta.startsWith('-')?'negative':'positive'}">${e.delta.startsWith('-')?'':'+'}${escapeHtml(e.delta_bnb)}</td><td class="mono">${escapeHtml(e.new_bnb)}</td><td><a href="https://bscscan.com/block/${e.block}" target="_blank" rel="noopener noreferrer">${e.block} ↗</a></td><td>${delivery[e.delivery]||escapeHtml(e.delivery)}${e.delivery_error?`<small class="negative">${escapeHtml(e.delivery_error)} · попыток: ${e.attempts}</small>`:''}</td></tr>`).join('');
+ $('event-list').innerHTML=d.events.map(e=>`<tr><td>${escapeHtml(date(e.created))}<small>${escapeHtml(e.name)} · ${short(e.address)}</small></td><td class="mono ${e.delta.startsWith('-')?'negative':'positive'}">${e.delta.startsWith('-')?'':'+'}${escapeHtml(e.delta_bnb)}</td><td class="mono">${escapeHtml(e.new_bnb)}</td><td><a href="https://bscscan.com/block/${e.block}" target="_blank" rel="noopener noreferrer">${e.block} ↗</a></td><td>Telegram: ${delivery[e.delivery]||escapeHtml(e.delivery)}${e.delivery_error?`<small class="negative">${escapeHtml(e.delivery_error)} · попыток: ${e.attempts}</small>`:''}<small>Email: ${delivery[e.email_delivery]||'Не требуется'}</small>${e.email_error?`<small class="negative">${escapeHtml(e.email_error)} · попыток: ${e.email_attempts}</small>`:''}</td></tr>`).join('');
  if(!loadedSettings){const c=d.settings;$('interval').value=c.interval;$('threshold').value=c.threshold;$('rpc-urls').value=c.rpc_urls.join('\n');$('telegram-enabled').checked=c.telegram_enabled;$('telegram-chat').value=c.telegram_chat;$('token-hint').textContent=c.telegram_token_set?'Токен сохранён. Пустое поле оставит его без изменений.':'Токен ещё не задан.';loadedSettings=true;}
  }catch(e){toast(e.message,true);}finally{refreshing=false;}
 }
@@ -122,3 +132,20 @@ $('telegram-test').onclick=async()=>{const b=$('telegram-test');b.disabled=true;
 $('google-form').onsubmit=async e=>{e.preventDefault();try{await api('settings','POST',{sheets_enabled:$('sheets-enabled').checked,sheets_id:$('sheets-id').value.trim(),sheets_tab:$('sheets-tab').value.trim(),sheets_interval:Number($('sheets-interval').value)});loadedGoogle=false;toast('Настройки Google сохранены');await refresh();}catch(e){toast(e.message,true);}};
 $('google-sync').onclick=async()=>{try{await api('sheets/sync','POST',{});toast('Синхронизация запрошена');}catch(e){toast(e.message,true);}};
 setInterval(refresh,5000);
+
+
+$('email-form').onsubmit=async e=>{
+ e.preventDefault();const b=e.submitter;b.disabled=true;
+ try{
+  const data={email_enabled:$('email-enabled').checked,smtp_password:$('smtp-password').value,clear_smtp_password:$('clear-smtp-password').checked};
+  for(const key of ['smtp_host','smtp_port','smtp_security','smtp_username','email_from','email_to']) data[key]=$(key.replaceAll('_','-')).value.trim();
+  await api('settings','POST',data);
+  $('smtp-password').value='';$('clear-smtp-password').checked=false;loadedEmail=false;
+  toast('Настройки email сохранены');await refresh();
+ }catch(err){toast(err.message,true);}finally{b.disabled=false;}
+};
+$('email-test').onclick=async()=>{
+ const b=$('email-test');b.disabled=true;
+ try{await api('email/test','POST',{});toast('Тестовое письмо принято SMTP. Проверьте входящие и спам.');}
+ catch(err){toast(err.message,true);}finally{b.disabled=false;}
+};

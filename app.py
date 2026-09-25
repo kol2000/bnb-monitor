@@ -17,6 +17,8 @@ from urllib.request import Request, urlopen
 from flask import Flask, jsonify, request, session, render_template
 from werkzeug.security import generate_password_hash, check_password_hash
 from prices import usd, SOURCE
+from email_notifications import DEFAULTS as EMAIL_DEFAULTS, validate_settings, send_email, EmailError
+from email.utils import make_msgid
 
 DATA = Path(os.environ.get('DATA_DIR', '/data'))
 DATA.mkdir(parents=True, exist_ok=True)
@@ -26,6 +28,8 @@ DEFAULTS = {'interval': 30, 'threshold': '0.00000001', 'telegram_enabled': False
             'rpc_urls': ['https://bsc-dataseed-public.bnbchain.org'],
             'sheets_enabled': False, 'sheets_id': '', 'sheets_tab': 'Кошельки',
             'sheets_interval': 300}
+
+DEFAULTS.update(EMAIL_DEFAULTS)
 
 @contextmanager
 def db():
@@ -56,6 +60,11 @@ def init_db():
             attempts INTEGER NOT NULL DEFAULT 0, retry_at REAL NOT NULL DEFAULT 0,
             delivery_error TEXT, chat TEXT NOT NULL DEFAULT '',
             UNIQUE(wallet_id, block));
+        CREATE TABLE IF NOT EXISTS email_outbox (
+            event_id INTEGER PRIMARY KEY, recipient TEXT NOT NULL, sender TEXT NOT NULL,
+            delivery TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
+            retry_at REAL NOT NULL DEFAULT 0, delivery_error TEXT, message_id TEXT NOT NULL);
+        CREATE INDEX IF NOT EXISTS email_delivery ON email_outbox(delivery, retry_at);
         CREATE TABLE IF NOT EXISTS status (key TEXT PRIMARY KEY, value TEXT NOT NULL);
         CREATE INDEX IF NOT EXISTS event_delivery ON events(delivery, retry_at);
         ''')
@@ -135,11 +144,15 @@ def record_balance(wallet_id, amount, block, cfg):
         now = time.time()
         if w['balance'] is not None and int(w['balance']) != amount:
             delta = amount - int(w['balance'])
-            send = delta > 0 and delta >= threshold_wei(cfg['threshold']) and w['notify'] and cfg['telegram_enabled']
-            c.execute('''INSERT INTO events(wallet_id,address,name,old,new,delta,block,created,delivery,chat)
+            eligible = delta > 0 and delta >= threshold_wei(cfg['threshold']) and w['notify']
+            send = eligible and cfg['telegram_enabled']
+            event = c.execute('''INSERT INTO events(wallet_id,address,name,old,new,delta,block,created,delivery,chat)
                          VALUES (?,?,?,?,?,?,?,?,?,?)''',
                       (w['id'], w['address'], w['name'], w['balance'], str(amount), str(delta),
                        block, now, 'pending' if send else 'off', cfg['telegram_chat'] if send else ''))
+            if eligible and cfg.get('email_enabled'):
+                c.execute('INSERT INTO email_outbox(event_id,recipient,sender,message_id) VALUES (?,?,?,?)',
+                          (event.lastrowid, cfg['email_to'], cfg['email_from'], make_msgid()))
         c.execute('UPDATE wallets SET balance=?,block=?,checked=?,error=NULL WHERE id=?',
                   (str(amount), block, now, wallet_id))
 
@@ -231,10 +244,13 @@ def logout():
 def state():
     cfg = settings()
     cfg['telegram_token_set'] = bool(cfg.pop('telegram_token'))
+    cfg['smtp_password_set'] = bool(cfg.pop('smtp_password', ''))
     cfg['google_key_set'] = (DATA / 'google-service-account.json').is_file()
     with db() as c:
         wallets = [dict(r) for r in c.execute('SELECT * FROM wallets ORDER BY id DESC')]
-        events = [dict(r) for r in c.execute('SELECT * FROM events ORDER BY id DESC LIMIT 200')]
+        events = [dict(r) for r in c.execute('''SELECT e.*, COALESCE(m.delivery, 'off') AS email_delivery,
+                    m.attempts AS email_attempts, m.delivery_error AS email_error
+                    FROM events e LEFT JOIN email_outbox m ON m.event_id=e.id ORDER BY e.id DESC LIMIT 200''')]
         status = {r['key']: json.loads(r['value']) for r in c.execute('SELECT * FROM status')}
     price = status.get('bnb_usd')
     price_at = status.get('price_at')
@@ -384,14 +400,27 @@ def save_settings():
         raise ValueError('Интервал Google: от 60 до 86400 секунд.')
     if sheets_enabled and (not sheets_id or not (DATA / 'google-service-account.json').is_file()):
         raise ValueError('Укажите таблицу и сначала установите ключ через configure_google.py на VM.')
+    email_cfg = validate_settings(data, cfg)
     cfg.update(interval=interval, threshold=threshold, rpc_urls=urls, telegram_enabled=enabled,
                telegram_token=token, telegram_chat=chat, sheets_enabled=sheets_enabled,
                sheets_id=sheets_id, sheets_tab=sheets_tab, sheets_interval=sheets_interval)
+    cfg.update(email_cfg)
     with db() as c:
         for k, v in cfg.items():
             c.execute('UPDATE settings SET value=? WHERE key=?', (json.dumps(v), k))
         if not enabled:
             c.execute("UPDATE events SET delivery='cancelled' WHERE delivery='pending'")
+        c.execute("""UPDATE email_outbox SET delivery='cancelled' WHERE delivery='pending'
+                     AND (?=0 OR recipient!=? OR sender!=?)""",
+                  (int(cfg['email_enabled']), cfg['email_to'], cfg['email_from']))
+    return {'ok': True}
+
+@app.post('/api/email/test')
+def test_email():
+    try:
+        send_email(settings(), 'BNB Monitor: тестовое письмо. Соединение работает.')
+    except EmailError as exc:
+        raise RemoteError(str(exc)) from None
     return {'ok': True}
 
 @app.post('/api/sheets/sync')
@@ -410,3 +439,4 @@ def test_telegram():
 def request_check():
     set_status(check_requested=True)
     return {'ok': True}
+

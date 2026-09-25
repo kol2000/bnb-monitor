@@ -28,7 +28,7 @@
       </label>
       <label class="check-label"><input id="hide-small-balances" type="checkbox"> Только кошельки с балансом от $0.01</label>
       <p id="wallet-visible-count" class="muted small" aria-live="polite"></p>
-      <div class="table-wrap card"><table><thead><tr><th>Кошелёк / адрес</th><th>Баланс BNB</th><th>≈ USD</th><th>Проверка</th><th>Telegram</th><th></th></tr></thead><tbody id="wallet-list"></tbody></table><div id="wallet-empty" class="empty"><div class="empty-icon">◇</div><h2>Начните с первого кошелька</h2><p>Добавьте публичный BSC-адрес выше.<br>Баланс появится после ближайшей проверки.</p></div><div id="wallet-filter-empty" class="empty" hidden>Нет кошельков с известным балансом от $0.01. Отключите фильтр, чтобы увидеть все адреса.</div></div>
+      <div class="table-wrap card"><table><thead><tr><th>Кошелёк / адрес</th><th>Баланс BNB</th><th>≈ USD</th><th>Проверка</th><th>Уведомления</th><th></th></tr></thead><tbody id="wallet-list"></tbody></table><div id="wallet-empty" class="empty"><div class="empty-icon">◇</div><h2>Начните с первого кошелька</h2><p>Добавьте публичный BSC-адрес выше.<br>Баланс появится после ближайшей проверки.</p></div><div id="wallet-filter-empty" class="empty" hidden>Нет кошельков с известным балансом от $0.01. Отключите фильтр, чтобы увидеть все адреса.</div></div>
     </section>
     <section id="tab-history" hidden><div class="section-heading"><h2>Последние 200 изменений</h2><p class="muted small">Время отображается в часовом поясе вашего браузера.</p></div><div class="table-wrap card"><table><thead><tr><th>Время / кошелёк</th><th>Изменение BNB</th><th>Новый баланс</th><th>Блок</th><th>Уведомление</th></tr></thead><tbody id="event-list"></tbody></table><div id="event-empty" class="empty">Изменений пока нет. Начальный баланс в историю не записывается.</div></div></section>
     <section id="tab-settings" hidden>
@@ -39,11 +39,31 @@
       <p class="muted small">Столбец A — имя/email, B — BSC-адрес. Новые адреса добавляются, имена обновляются. Раз в 24 часа все адреса, отсутствующие в таблице, удаляются из мониторинга, включая добавленные вручную. История сохраняется. Пустой лист удалит все кошельки при очередной сверке. При ошибке чтения или неверных адресах удаление отменяется. Если удалить кошелёк только в панели, синхронизация добавит его снова.</p>
       <p id="google-key-status" class="muted small"></p><p id="google-status" class="small"></p>
       <div class="save-bar"><button type="submit">Сохранить Google</button><button type="button" class="secondary" id="google-sync">Синхронизировать сейчас</button></div></form></div>
-      <form id="settings-form"><div class="settings-grid"><div class="card"><p class="eyebrow">ПОДКЛЮЧЕНИЕ К СЕТИ</p><h2>Проверки балансов</h2><label>Интервал, секунды<input id="interval" type="number" min="10" max="3600" required></label><label>RPC URL — по одному на строку<textarea id="rpc-urls" rows="4" required spellcheck="false"></textarea></label><p class="muted small">HTTPS, BSC mainnet (56), поддержка finalized. При ошибке используются следующие адреса. Публичные RPC имеют лимиты; большой список требует собственной квоты. Интервал отсчитывается после окончания цикла.</p><label>Минимальный прирост для Telegram, BNB<input id="threshold" type="text" inputmode="decimal" required></label><p class="muted small">0 — уведомлять о любом положительном изменении. Мелкие изменения не суммируются для достижения порога. WBNB и другие токены не отслеживаются.</p></div>
+      <form id="settings-form"><div class="settings-grid"><div class="card"><p class="eyebrow">ПОДКЛЮЧЕНИЕ К СЕТИ</p><h2>Проверки балансов</h2><label>Интервал, секунды<input id="interval" type="number" min="10" max="3600" required></label><label>RPC URL — по одному на строку<textarea id="rpc-urls" rows="4" required spellcheck="false"></textarea></label><p class="muted small">HTTPS, BSC mainnet (56), поддержка finalized. При ошибке используются следующие адреса. Публичные RPC имеют лимиты; большой список требует собственной квоты. Интервал отсчитывается после окончания цикла.</p><label>Минимальный прирост для уведомлений, BNB<input id="threshold" type="text" inputmode="decimal" required></label><p class="muted small">0 — уведомлять о любом положительном изменении. Мелкие изменения не суммируются для достижения порога. WBNB и другие токены не отслеживаются.</p></div>
       <div class="card"><p class="eyebrow">УВЕДОМЛЕНИЯ</p><h2>Telegram</h2><label class="check-label"><input id="telegram-enabled" type="checkbox"> Включить уведомления о приросте</label><label>Токен бота<input id="telegram-token" type="password" autocomplete="new-password" placeholder="123456:…"></label><p id="token-hint" class="muted small"></p><label class="check-label"><input id="clear-token" type="checkbox"> Удалить сохранённый токен</label><label>Ваш Chat ID<input id="telegram-chat" placeholder="123456789" inputmode="text"></label><p class="muted small">Создайте бота через @BotFather, откройте чат с вашим ботом и нажмите Start. Введите числовой Chat ID. Сначала сохраните настройки, затем отправьте тест.</p><button id="telegram-test" type="button" class="secondary">Отправить тестовое сообщение</button><p class="muted small">Выключение Telegram отменяет ожидающие сообщения. Токен хранится в базе на вашей VM; берегите резервные копии.</p></div></div><div class="save-bar"><span class="muted small">Изменения применятся при следующем цикле.</span><button type="submit">Сохранить настройки</button></div></form>
+      <div class="card google-card"><p class="eyebrow">УВЕДОМЛЕНИЯ</p><h2>Электронная почта</h2>
+      <form id="email-form">
+      <label class="check-label"><input id="email-enabled" type="checkbox"> Включить email-уведомления о приросте</label>
+      <div class="settings-grid">
+        <label>SMTP-сервер<input id="smtp-host" placeholder="smtp.mail.ru" maxlength="254"></label>
+        <label>Порт<input id="smtp-port" type="number" min="1" max="65535" value="465" required></label>
+        <label>Шифрование<select id="smtp-security"><option value="ssl">SSL/TLS (обычно порт 465)</option><option value="starttls">STARTTLS (обычно порт 587)</option></select></label>
+        <label>Логин SMTP<input id="smtp-username" autocomplete="username" maxlength="254"></label>
+        <label>Пароль приложения<input id="smtp-password" type="password" autocomplete="new-password" maxlength="1024"></label>
+        <label>Адрес отправителя<input id="email-from" type="email" maxlength="254" placeholder="Ящик, через который отправляем"></label>
+        <label>Получатель уведомлений<input id="email-to" type="email" maxlength="254" placeholder="Любой ваш email"></label>
+      </div>
+      <p id="smtp-password-hint" class="muted small"></p>
+      <label class="check-label"><input id="clear-smtp-password" type="checkbox"> Удалить сохранённый пароль</label>
+      <p class="muted small">Получатель может отличаться от отправителя. SMTP использует пароль приложения почтового сервиса. Письма отправляются независимо от Telegram. Общий порог прироста и переключатель уведомлений у кошелька действуют на оба канала. Сначала сохраните настройки, затем отправьте тест.</p>
+      <p class="muted small">Выключение email или смена отправителя/получателя отменяет ожидающие письма. Пароль хранится в базе на вашей VM; берегите резервные копии.</p>
+      <p id="email-status" class="small" aria-live="polite"></p>
+      <div class="save-bar"><button type="submit">Сохранить email</button><button id="email-test" type="button" class="secondary">Отправить тестовое письмо</button></div>
+      </form></div>
     </section>
     <footer>BNB Monitor 1.1 · Только чтение · Панель для локальной сети / VPN</footer>
   </div>
   <div id="toast" role="status" hidden></div>
 </main>
 </body></html>
+
