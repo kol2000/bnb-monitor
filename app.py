@@ -11,8 +11,7 @@ import time
 from collections import defaultdict, deque
 from contextlib import contextmanager
 from decimal import Decimal, InvalidOperation
-from urllib.parse import urlparse, quote
-import ipaddress
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 from flask import Flask, jsonify, request, session, render_template
@@ -31,8 +30,6 @@ DEFAULTS = {'interval': 30, 'threshold': '0.00000001', 'telegram_enabled': False
             'sheets_interval': 300}
 
 DEFAULTS.update(EMAIL_DEFAULTS)
-DEFAULTS.update(telegram_proxy_enabled=False, telegram_proxy_host='', telegram_proxy_port=1080,
-                telegram_proxy_username='', telegram_proxy_password='')
 
 @contextmanager
 def db():
@@ -122,88 +119,12 @@ def rpc(url, method, params):
         raise RemoteError('Ошибка RPC. Проверьте endpoint, лимит и поддержку finalized.')
     return r['result']
 
-def validate_telegram_proxy(data, cfg):
-    keys = ('telegram_proxy_enabled', 'telegram_proxy_host', 'telegram_proxy_port',
-            'telegram_proxy_username', 'telegram_proxy_password')
-    result = {k: cfg[k] for k in keys}
-    for k in keys[:-1]:
-        if k in data:
-            result[k] = data[k]
-    if type(result['telegram_proxy_enabled']) is not bool:
-        raise ValueError('Неверное значение SOCKS5.')
-    host = result['telegram_proxy_host']
-    if not isinstance(host, str):
-        raise ValueError('Введите адрес SOCKS5-сервера.')
-    host = host.strip()
-    if host.startswith('[') and host.endswith(']'):
-        host = host[1:-1]
-    if host:
-        try:
-            ipaddress.ip_address(host)
-        except ValueError:
-            if len(host) > 253 or not all(re.fullmatch(r'[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?', part) for part in host.split('.')):
-                raise ValueError('SOCKS5: укажите IP или имя сервера без протокола, порта и логина.')
-    result['telegram_proxy_host'] = host
-    try:
-        port = int(result['telegram_proxy_port'])
-    except (TypeError, ValueError):
-        raise ValueError('Порт SOCKS5 должен быть числом.')
-    if not 1 <= port <= 65535:
-        raise ValueError('Порт SOCKS5: от 1 до 65535.')
-    result['telegram_proxy_port'] = port
-    password = data.get('telegram_proxy_password', '')
-    if not isinstance(password, str):
-        raise ValueError('Некорректный пароль SOCKS5.')
-    if password:
-        result['telegram_proxy_password'] = password
-    if data.get('clear_telegram_proxy_password'):
-        result['telegram_proxy_password'] = ''
-    for k in ('telegram_proxy_username', 'telegram_proxy_password'):
-        value = result[k]
-        if not isinstance(value, str) or len(value.encode('utf-8')) > 255 or any(ord(ch) < 32 for ch in value):
-            raise ValueError('Логин и пароль SOCKS5: максимум 255 байт, без управляющих символов.')
-    if result['telegram_proxy_enabled']:
-        if not host:
-            raise ValueError('Укажите сервер SOCKS5.')
-        if bool(result['telegram_proxy_username']) != bool(result['telegram_proxy_password']):
-            raise ValueError('Укажите и логин, и пароль SOCKS5 либо оставьте оба пустыми.')
-    return result
-
-def telegram_proxy_post(cfg, url, payload):
-    # Per-request transport only: never change process-wide sockets/proxy variables.
-    try:
-        import requests
-        host = cfg['telegram_proxy_host']
-        if ':' in host:
-            host = '[' + host + ']'
-        auth = ''
-        if cfg['telegram_proxy_username']:
-            auth = (quote(cfg['telegram_proxy_username'], safe='') + ':' +
-                    quote(cfg['telegram_proxy_password'], safe='') + '@')
-        proxy = f"socks5h://{auth}{host}:{cfg['telegram_proxy_port']}"
-        with requests.Session() as client:
-            client.trust_env = False
-            with client.post(url, json=payload, proxies={'https': proxy}, timeout=(10, 12),
-                             allow_redirects=False, stream=True) as response:
-                if response.status_code != 200:
-                    raise ValueError()
-                raw = bytearray()
-                for chunk in response.iter_content(chunk_size=65536):
-                    raw.extend(chunk)
-                    if len(raw) > 2_000_000:
-                        raise ValueError()
-                return json.loads(raw)
-    except Exception:
-        # Raw exceptions can contain proxy credentials and the bot token.
-        raise RemoteError('Telegram через SOCKS5 недоступен. Проверьте сервер, порт, логин и пароль прокси.') from None
-
 def telegram(s, text, chat=None):
     if not re.fullmatch(r'\d+:[A-Za-z0-9_-]{20,}', s['telegram_token']):
         raise RemoteError('Токен Telegram не настроен.')
     if not s['telegram_chat']:
         raise RemoteError('Chat ID не настроен.')
-    transport = (lambda url, payload: telegram_proxy_post(s, url, payload)) if s.get('telegram_proxy_enabled') else post_json
-    r = transport('https://api.telegram.org/bot' + s['telegram_token'] + '/sendMessage',
+    r = post_json('https://api.telegram.org/bot' + s['telegram_token'] + '/sendMessage',
                   {'chat_id': chat or s['telegram_chat'], 'text': text,
                    'link_preview_options': {'is_disabled': True}})
     if not isinstance(r, dict) or not r.get('ok'):
@@ -323,7 +244,6 @@ def logout():
 def state():
     cfg = settings()
     cfg['telegram_token_set'] = bool(cfg.pop('telegram_token'))
-    cfg['telegram_proxy_password_set'] = bool(cfg.pop('telegram_proxy_password', ''))
     cfg['smtp_password_set'] = bool(cfg.pop('smtp_password', ''))
     cfg['google_key_set'] = (DATA / 'google-service-account.json').is_file()
     with db() as c:
@@ -480,13 +400,11 @@ def save_settings():
         raise ValueError('Интервал Google: от 60 до 86400 секунд.')
     if sheets_enabled and (not sheets_id or not (DATA / 'google-service-account.json').is_file()):
         raise ValueError('Укажите таблицу и сначала установите ключ через configure_google.py на VM.')
-    proxy_cfg = validate_telegram_proxy(data, cfg)
     email_cfg = validate_settings(data, cfg)
     cfg.update(interval=interval, threshold=threshold, rpc_urls=urls, telegram_enabled=enabled,
                telegram_token=token, telegram_chat=chat, sheets_enabled=sheets_enabled,
                sheets_id=sheets_id, sheets_tab=sheets_tab, sheets_interval=sheets_interval)
     cfg.update(email_cfg)
-    cfg.update(proxy_cfg)
     with db() as c:
         for k, v in cfg.items():
             c.execute('UPDATE settings SET value=? WHERE key=?', (json.dumps(v), k))
