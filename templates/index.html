@@ -43,7 +43,7 @@
       <div class="card"><p class="eyebrow">УВЕДОМЛЕНИЯ</p><h2>Telegram</h2><label class="check-label"><input id="telegram-enabled" type="checkbox"> Включить уведомления о приросте</label><label>Токен бота<input id="telegram-token" type="password" autocomplete="new-password" placeholder="123456:…"></label><p id="token-hint" class="muted small"></p><label class="check-label"><input id="clear-token" type="checkbox"> Удалить сохранённый токен</label><label>Ваш Chat ID<input id="telegram-chat" placeholder="123456789" inputmode="text"></label><p class="muted small">Создайте бота через @BotFather, откройте чат с вашим ботом и нажмите Start. Введите числовой Chat ID. Сначала сохраните настройки, затем отправьте тест.</p><button id="telegram-test" type="button" class="secondary">Отправить тестовое сообщение</button><p class="muted small">Выключение Telegram отменяет ожидающие сообщения. Токен хранится в базе на вашей VM; берегите резервные копии.</p></div></div><div class="save-bar"><span class="muted small">Изменения применятся при следующем цикле.</span><button type="submit">Сохранить настройки</button></div></form>
       <div class="card google-card"><p class="eyebrow">УВЕДОМЛЕНИЯ</p><h2>Электронная почта</h2>
       <form id="email-form">
-      <label class="check-label"><input id="email-enabled" type="checkbox"> Включить email-уведомления о приросте</label>
+      <label class="check-label"><input id="email-enabled" type="checkbox"> Включить резервные уведомления по email</label>
       <div class="settings-grid">
         <label>SMTP-сервер<input id="smtp-host" placeholder="smtp.mail.ru" maxlength="254"></label>
         <label>Порт<input id="smtp-port" type="number" min="1" max="65535" value="465" required></label>
@@ -55,7 +55,7 @@
       </div>
       <p id="smtp-password-hint" class="muted small"></p>
       <label class="check-label"><input id="clear-smtp-password" type="checkbox"> Удалить сохранённый пароль</label>
-      <p class="muted small">Получатель может отличаться от отправителя. SMTP использует пароль приложения почтового сервиса. Письма отправляются независимо от Telegram. Общий порог прироста и переключатель уведомлений у кошелька действуют на оба канала. Сначала сохраните настройки, затем отправьте тест.</p>
+      <p class="muted small">Получатель может отличаться от отправителя. SMTP использует пароль приложения почтового сервиса. Telegram — основной канал. Письмо отправляется после трёх неудачных попыток Telegram; если Telegram выключен — сразу. Успех Telegram отменяет ожидающее письмо, успех email прекращает повторы Telegram. Тестовое письмо отправляется независимо от этой логики. Общий порог прироста и переключатель уведомлений у кошелька действуют на оба канала. Сначала сохраните настройки, затем отправьте тест.</p>
       <p class="muted small">Выключение email или смена отправителя/получателя отменяет ожидающие письма. Пароль хранится в базе на вашей VM; берегите резервные копии.</p>
       <p id="email-status" class="small" aria-live="polite"></p>
       <div class="save-bar"><button type="submit">Сохранить email</button><button id="email-test" type="button" class="secondary">Отправить тестовое письмо</button></div>
@@ -66,4 +66,5 @@
   <div id="toast" role="status" hidden></div>
 </main>
 </body></html>
+
 

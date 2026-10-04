@@ -9,6 +9,18 @@ from prices import fetch_quote, usd
 from email_notifications import send_email, EmailError
 
 stop = threading.Event()
+# Serialize channel selection and network delivery so the two loops cannot
+# deliver the same event concurrently. The worker process already holds flock.
+delivery_lock = threading.RLock()
+EMAIL_FALLBACK_ATTEMPTS = 3
+
+def serialized_delivery(fn):
+    from functools import wraps
+    @wraps(fn)
+    def wrapped(*args, **kwargs):
+        with delivery_lock:
+            return fn(*args, **kwargs)
+    return wrapped
 
 def heartbeat():
     (DATA / 'heartbeat').touch()
@@ -113,6 +125,7 @@ def notification_text(e):
                 f"Блок: {e['block']}\nhttps://bscscan.com/address/{e['address']}\n\n"
                 'Это разница балансов между проверками, не сумма отдельной транзакции.')
 
+@serialized_delivery
 def deliver():
     cfg = settings()
     if not cfg['telegram_enabled']:
@@ -123,6 +136,9 @@ def deliver():
         if stop.is_set():
             break
         heartbeat()
+        cfg = settings()
+        if not cfg['telegram_enabled']:
+            break
         with db() as c:
             w = c.execute('SELECT notify FROM wallets WHERE id=?', (e['wallet_id'],)).fetchone()
             current = c.execute('SELECT delivery FROM events WHERE id=?', (e['id'],)).fetchone()
@@ -135,25 +151,41 @@ def deliver():
         try:
             telegram(cfg, text, e['chat'])
             with db() as c:
-                c.execute("UPDATE events SET delivery='sent',delivery_error=NULL WHERE id=?", (e['id'],))
+                c.execute("UPDATE events SET delivery='sent',delivery_error=NULL,retry_at=0 WHERE id=?", (e['id'],))
+                c.execute("UPDATE email_outbox SET delivery='suppressed',delivery_error=NULL,retry_at=0 WHERE event_id=? AND delivery='pending'", (e['id'],))
         except RemoteError as exc:
             with db() as c:
                 c.execute('UPDATE events SET attempts=attempts+1,retry_at=?,delivery_error=? WHERE id=?',
                           (time.time() + min(3600, 30 * 2**min(e['attempts'], 7)), str(exc), e['id']))
         stop.wait(1.1)
 
+@serialized_delivery
 def deliver_email():
+    cfg = settings()
     with db() as c:
+        # Also reconcile the existing queue after upgrading, regardless of retry_at.
+        c.execute("""UPDATE email_outbox SET delivery='suppressed',delivery_error=NULL,retry_at=0
+            WHERE delivery='pending' AND event_id IN
+            (SELECT id FROM events WHERE delivery='sent')""")
         events = [dict(r) for r in c.execute("""SELECT e.*, m.recipient, m.sender,
             m.message_id, m.attempts AS email_attempts FROM email_outbox m
             JOIN events e ON e.id=m.event_id
-            WHERE m.delivery='pending' AND m.retry_at<=? ORDER BY e.id LIMIT 20""", (time.time(),))]
+            WHERE m.delivery='pending' AND m.retry_at<=?
+            AND e.delivery!='sent'
+            AND (?=0 OR e.delivery='off' OR (e.delivery='pending' AND e.attempts>=?))
+            ORDER BY e.id LIMIT 20""", (time.time(), int(cfg['telegram_enabled']), EMAIL_FALLBACK_ATTEMPTS))]
     for e in events:
         if stop.is_set():
             return
         cfg = settings()
         with db() as c:
             current = c.execute('SELECT delivery FROM email_outbox WHERE event_id=?', (e['id'],)).fetchone()
+            event = c.execute('SELECT delivery,attempts FROM events WHERE id=?', (e['id'],)).fetchone()
+            if not event or event['delivery'] == 'sent':
+                continue
+            if cfg['telegram_enabled'] and event['delivery'] != 'off':
+                if event['delivery'] != 'pending' or event['attempts'] < EMAIL_FALLBACK_ATTEMPTS:
+                    continue
             w = c.execute('SELECT notify FROM wallets WHERE id=?', (e['wallet_id'],)).fetchone()
             if not current or current['delivery'] != 'pending':
                 continue
@@ -164,7 +196,8 @@ def deliver_email():
         try:
             send_email(cfg, notification_text(e), e['message_id'])
             with db() as c:
-                c.execute("UPDATE email_outbox SET delivery='sent',delivery_error=NULL WHERE event_id=?", (e['id'],))
+                c.execute("UPDATE email_outbox SET delivery='sent',delivery_error=NULL,retry_at=0 WHERE event_id=?", (e['id'],))
+                c.execute("UPDATE events SET delivery='cancelled',delivery_error=NULL,retry_at=0 WHERE id=? AND delivery='pending'", (e['id'],))
             set_status(email_last_sent=time.time(), email_error=None)
         except EmailError as exc:
             with db() as c:
@@ -174,8 +207,13 @@ def deliver_email():
             set_status(email_error=str(exc))
         stop.wait(1.1)
 
+    with db() as c:
+        pending = c.execute("SELECT 1 FROM email_outbox WHERE delivery='pending' LIMIT 1").fetchone()
+    if not pending:
+        set_status(email_error=None)
+
 def email_loop():
-    # Separate from RPC sweeps and Telegram timeouts; only the locked worker starts it.
+    # Separate from RPC sweeps; channel delivery shares a lock.
     while not stop.is_set():
         try:
             deliver_email()
@@ -232,4 +270,5 @@ if __name__ == '__main__':
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     signal.signal(signal.SIGINT, lambda *_: stop.set())
     run()
+
 

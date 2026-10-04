@@ -43,15 +43,57 @@ class EmailTests(unittest.TestCase):
         self.assertEqual(self.email_row()['delivery'], 'sent')
         self.assertEqual(self.base.events()[0]['delivery'], 'off')
 
-    def test_telegram_failure_does_not_block_email(self):
+    def test_fallback_only_after_three_failures(self):
         self.queue(telegram=True)
-        with patch('worker.telegram', side_effect=mod.RemoteError('offline')), patch.object(worker.stop, 'wait'):
-            worker.deliver()
-        with patch('worker.send_email') as send, patch.object(worker.stop, 'wait'):
+        with patch('worker.telegram', side_effect=mod.RemoteError('offline')), patch.object(worker.stop, 'wait'), patch('worker.send_email') as send:
             worker.deliver_email()
-        send.assert_called_once()
+            send.assert_not_called()
+            for attempt in range(1, 4):
+                with mod.db() as c: c.execute('UPDATE events SET retry_at=0')
+                worker.deliver()
+                worker.deliver_email()
+                self.assertEqual(send.call_count, int(attempt == 3))
         self.assertEqual(self.email_row()['delivery'], 'sent')
-        self.assertEqual(self.base.events()[0]['delivery'], 'pending')
+        self.assertEqual(self.base.events()[0]['delivery'], 'cancelled')
+        with patch('worker.telegram') as tg:
+            worker.deliver()
+        tg.assert_not_called()
+
+    def test_telegram_success_suppresses_email(self):
+        self.queue(telegram=True)
+        with patch('worker.telegram'), patch.object(worker.stop, 'wait'):
+            worker.deliver()
+        with patch('worker.send_email') as send:
+            worker.deliver_email()
+        send.assert_not_called()
+        self.assertEqual(self.email_row()['delivery'], 'suppressed')
+        self.assertEqual(self.base.events()[0]['delivery'], 'sent')
+
+    def test_old_pending_email_for_sent_telegram_is_reconciled(self):
+        self.queue(telegram=True)
+        with mod.db() as c:
+            c.execute("UPDATE events SET delivery='sent'")
+            c.execute("UPDATE email_outbox SET retry_at=9999999999,delivery_error='old error'")
+        mod.set_status(email_error='old error')
+        with patch('worker.send_email') as send:
+            worker.deliver_email()
+        send.assert_not_called()
+        self.assertEqual(self.email_row()['delivery'], 'suppressed')
+        self.assertIsNone(self.email_row()['delivery_error'])
+        self.assertIsNone(self.client.get('/api/state').json['status']['email_error'])
+
+    def test_failed_fallback_then_telegram_recovery(self):
+        self.queue(telegram=True)
+        with mod.db() as c: c.execute('UPDATE events SET attempts=3')
+        with patch('worker.send_email', side_effect=EmailError('offline')), patch.object(worker.stop, 'wait'):
+            worker.deliver_email()
+        self.assertEqual(self.email_row()['delivery'], 'pending')
+        with patch('worker.telegram'), patch.object(worker.stop, 'wait'):
+            worker.deliver()
+        with patch('worker.send_email') as send:
+            worker.deliver_email()
+        send.assert_not_called()
+        self.assertEqual(self.email_row()['delivery'], 'suppressed')
 
     def test_retry_survives_init_and_keeps_message_id(self):
         self.queue(); original=self.email_row()['message_id']
@@ -109,3 +151,4 @@ class EmailTests(unittest.TestCase):
         with patch('email_notifications.smtplib.SMTP',side_effect=smtplib.SMTPAuthenticationError(535,b'secret')):
             with self.assertRaises(EmailError) as err: send_email(cfg,'test')
         self.assertNotIn('secret',str(err.exception))
+

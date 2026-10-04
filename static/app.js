@@ -113,9 +113,9 @@ async function refresh(){
  }
  $('email-status').textContent=s.email_error || (s.email_last_sent?'Последнее письмо принято SMTP: '+date(s.email_last_sent):'Писем пока не отправлено');
  $('email-status').className='small '+(s.email_error?'negative':'muted');
- const delivery={pending:'В очереди',sent:'Отправлено',off:'Не требуется',cancelled:'Отменено'};
+ const delivery={pending:'В очереди',sent:'Отправлено',off:'Не требуется',cancelled:'Отменено',suppressed:'Не требуется — доставлено в Telegram'};
  $('event-empty').hidden=d.events.length>0;
- $('event-list').innerHTML=d.events.map(e=>`<tr><td>${escapeHtml(date(e.created))}<small>${escapeHtml(e.name)} · ${short(e.address)}</small></td><td class="mono ${e.delta.startsWith('-')?'negative':'positive'}">${e.delta.startsWith('-')?'':'+'}${escapeHtml(e.delta_bnb)}</td><td class="mono">${escapeHtml(e.new_bnb)}</td><td><a href="https://bscscan.com/block/${e.block}" target="_blank" rel="noopener noreferrer">${e.block} ↗</a></td><td>Telegram: ${delivery[e.delivery]||escapeHtml(e.delivery)}${e.delivery_error?`<small class="negative">${escapeHtml(e.delivery_error)} · попыток: ${e.attempts}</small>`:''}<small>Email: ${delivery[e.email_delivery]||'Не требуется'}</small>${e.email_error?`<small class="negative">${escapeHtml(e.email_error)} · попыток: ${e.email_attempts}</small>`:''}</td></tr>`).join('');
+ $('event-list').innerHTML=d.events.map(e=>`<tr><td>${escapeHtml(date(e.created))}<small>${escapeHtml(e.name)} · ${short(e.address)}</small></td><td class="mono ${e.delta.startsWith('-')?'negative':'positive'}">${e.delta.startsWith('-')?'':'+'}${escapeHtml(e.delta_bnb)}</td><td class="mono">${escapeHtml(e.new_bnb)}</td><td><a href="https://bscscan.com/block/${e.block}" target="_blank" rel="noopener noreferrer">${e.block} ↗</a></td><td>Telegram: ${delivery[e.delivery]||escapeHtml(e.delivery)}${e.delivery_error?`<small class="negative">${escapeHtml(e.delivery_error)} · попыток: ${e.attempts}</small>`:''}<small>Email: ${e.email_delivery==='pending' && e.delivery==='pending' && e.attempts<3 ? 'Резерв — ожидает Telegram' : (delivery[e.email_delivery]||'Не требуется')}</small>${e.email_error?`<small class="negative">${escapeHtml(e.email_error)} · попыток: ${e.email_attempts}</small>`:''}</td></tr>`).join('');
  if(!loadedSettings){const c=d.settings;$('interval').value=c.interval;$('threshold').value=c.threshold;$('rpc-urls').value=c.rpc_urls.join('\n');$('telegram-enabled').checked=c.telegram_enabled;$('telegram-chat').value=c.telegram_chat;$('token-hint').textContent=c.telegram_token_set?'Токен сохранён. Пустое поле оставит его без изменений.':'Токен ещё не задан.';loadedSettings=true;}
  }catch(e){toast(e.message,true);}finally{refreshing=false;}
 }
@@ -149,3 +149,4 @@ $('email-test').onclick=async()=>{
  try{await api('email/test','POST',{});toast('Тестовое письмо принято SMTP. Проверьте входящие и спам.');}
  catch(err){toast(err.message,true);}finally{b.disabled=false;}
 };
+
