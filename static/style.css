@@ -26,3 +26,7 @@
 @media(max-width:600px){.stats{grid-template-columns:1fr}}
 
 .stats .balance{overflow-wrap:anywhere}
+
+/* Two compact check timestamps in one column; details on hover. */
+.wallet-checks .check-line{white-space:nowrap;margin-top:0;line-height:1.7;font-variant-numeric:tabular-nums}
+.wallet-actions{display:grid;grid-template-columns:max-content max-content;align-items:center;gap:2px 4px}.wallet-actions .wallet-refresh{grid-column:1;grid-row:1;text-align:left}.wallet-actions .wallet-delete{grid-column:1;grid-row:2;text-align:left}
