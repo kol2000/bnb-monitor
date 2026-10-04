@@ -133,14 +133,18 @@ def notification_usd(delta):
     except (ValueError, TypeError, InvalidOperation):
         return ' (USD: курс недоступен)'
 
-def notification_text(e):
+def notification_text(e, html_format=False):
     asset = e.get('asset', 'BNB')
     valuation = notification_usd(e['delta']) if asset == 'BNB' else ''
-    return (f"🟢 Увеличение баланса {asset} · событие #{e['id']}\n"
-                f"{e['name']}\n{e['address']}\n\n"
-                f"Изменение: +{bnb(e['delta'])} {asset}{valuation}\nБаланс: {bnb(e['new'])} {asset}\n"
-                f"Блок: {e['block']}\nhttps://bscscan.com/address/{e['address']}\n\n"
-                'Это разница балансов между проверками, не сумма отдельной транзакции.')
+    prefix = (f"🟢 Увеличение баланса {asset} · событие #{e['id']}\n"
+              f"{e['name']}\n{e['address']}\n\n"
+              f"Изменение: +{bnb(e['delta'])} {asset}{valuation}\n")
+    balance = f"Баланс: {bnb(e['new'])} {asset}"
+    suffix = f"\n\nБлок: {e['block']}\nhttps://bscscan.com/address/{e['address']}"
+    if html_format:
+        from html import escape
+        return escape(prefix) + '<b>' + escape(balance) + '</b>' + escape(suffix)
+    return prefix + balance + suffix
 
 @serialized_delivery
 def deliver():
@@ -164,9 +168,9 @@ def deliver():
             if not w or not w['notify'] or cfg['telegram_chat'] != e['chat']:
                 c.execute("UPDATE events SET delivery='cancelled' WHERE id=?", (e['id'],))
                 continue
-        text = notification_text(e)
+        text = notification_text(e, html_format=True)
         try:
-            telegram(cfg, text, e['chat'])
+            telegram(cfg, text, e['chat'], html_format=True)
             with db() as c:
                 c.execute("UPDATE events SET delivery='sent',delivery_error=NULL,retry_at=0 WHERE id=?", (e['id'],))
                 c.execute("UPDATE email_outbox SET delivery='suppressed',delivery_error=NULL,retry_at=0 WHERE event_id=? AND delivery='pending'", (e['id'],))

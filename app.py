@@ -141,14 +141,16 @@ def rpc(url, method, params):
         raise RemoteError('Ошибка RPC. Проверьте endpoint, лимит и поддержку finalized.')
     return r['result']
 
-def telegram(s, text, chat=None):
+def telegram(s, text, chat=None, html_format=False):
     if not re.fullmatch(r'\d+:[A-Za-z0-9_-]{20,}', s['telegram_token']):
         raise RemoteError('Токен Telegram не настроен.')
     if not s['telegram_chat']:
         raise RemoteError('Chat ID не настроен.')
-    r = post_json('https://api.telegram.org/bot' + s['telegram_token'] + '/sendMessage',
-                  {'chat_id': chat or s['telegram_chat'], 'text': text,
-                   'link_preview_options': {'is_disabled': True}})
+    payload = {'chat_id': chat or s['telegram_chat'], 'text': text,
+               'link_preview_options': {'is_disabled': True}}
+    if html_format:
+        payload['parse_mode'] = 'HTML'
+    r = post_json('https://api.telegram.org/bot' + s['telegram_token'] + '/sendMessage', payload)
     if not isinstance(r, dict) or not r.get('ok'):
         raise RemoteError('Telegram отклонил сообщение. Проверьте токен, Chat ID и /start.')
 

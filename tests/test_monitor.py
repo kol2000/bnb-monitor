@@ -1,4 +1,5 @@
 import os
+from html import escape
 import tempfile
 import time
 import unittest
@@ -118,8 +119,8 @@ class MonitorTests(unittest.TestCase):
                     worker.deliver()
                 send.assert_called_once()
                 text = send.call_args.args[1]
-                self.assertIn(f"Изменение: +{mod.bnb(delta)} BNB {expected}\n", text)
-                self.assertIn(f"Баланс: {mod.bnb(10**18 + delta)} BNB\n", text)
+                self.assertIn(f"Изменение: +{mod.bnb(delta)} BNB {escape(expected)}\n", text)
+                self.assertIn(f"<b>Баланс: {mod.bnb(10**18 + delta)} BNB</b>\n\nБлок:", text)
                 self.assertEqual(self.events()[0]['delivery'], 'sent')
 
     def test_disable_cancels_queue_and_token_is_hidden(self):
