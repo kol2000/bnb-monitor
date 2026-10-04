@@ -18,6 +18,9 @@ class MonitorTests(unittest.TestCase):
             for table in ('wallets', 'events', 'status', 'settings'):
                 c.execute('DELETE FROM ' + table)
         mod.init_db()
+        # Legacy BNB scenarios explicitly exercise BNB-only mode.
+        with mod.db() as c:
+            c.execute("UPDATE settings SET value='false' WHERE key='usdt_enabled'")
         self.client = mod.app.test_client()
         self.csrf = self.client.get('/api/session').json['csrf']
         r = self.post('login', {'password': 'test-password-only-123'})
@@ -301,3 +304,4 @@ class MonitorTests(unittest.TestCase):
         self.assertGreater(self.wallet(),wid)
 
 if __name__=='__main__':unittest.main()
+

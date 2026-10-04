@@ -18,3 +18,11 @@
 [data-theme="light"] #toast.error{background:#fee4e2;color:#912018}
 [data-theme="light"] button:focus-visible,[data-theme="light"] input:focus,[data-theme="light"] textarea:focus,[data-theme="light"] select:focus-visible{outline:2px solid #805800;outline-offset:2px}
 @media(max-width:600px){header{flex-wrap:wrap}.header-right{gap:12px;flex-wrap:wrap}.theme-select{max-width:140px}}
+
+
+/* Separate balances for native BNB and the configured USDT contract. */
+.stats{grid-template-columns:repeat(4,minmax(0,1fr))}
+@media(max-width:1000px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:600px){.stats{grid-template-columns:1fr}}
+
+.stats .balance{overflow-wrap:anywhere}

@@ -157,11 +157,11 @@ def export_request(cfg, token, suffix, payload=None):
     except Exception:
         raise RemoteError('Не удалось обновить балансы в Google Таблице.') from None
 
-def balance_updates(header, rows, balances, tab):
+def balance_updates(header, rows, balances, tab, asset='BNB'):
     normalize = lambda value: ' '.join(str(value).split()).casefold()
-    matches = [i for i, value in enumerate(header) if normalize(value) == 'остаток bnb (bsc)']
+    matches = [i for i, value in enumerate(header) if normalize(value) == f'остаток {asset.lower()} (bsc)']
     if len(matches) != 1 or matches[0] < 2:
-        raise RemoteError('Нужен один столбец «остаток BNB (BSC)» в первой строке, после столбцов A и B.')
+        raise RemoteError(f'Нужен один столбец «остаток {asset} (BSC)» в первой строке, после столбцов A и B.')
     number = matches[0] + 1
     column = ''
     while number:
@@ -188,7 +188,10 @@ def export_balances(cycle_started):
             balances = {r['address']: r['balance'] for r in c.execute(
                 'SELECT address,balance FROM wallets WHERE balance IS NOT NULL AND error IS NULL AND checked>=?',
                 (cycle_started,))}
-        if not balances:
+            token_balances = {r['address']: r['usdt_balance'] for r in c.execute(
+                'SELECT address,usdt_balance FROM wallets WHERE usdt_balance IS NOT NULL AND usdt_error IS NULL AND usdt_checked>=?',
+                (cycle_started,))} if cfg['usdt_enabled'] else {}
+        if not balances and not token_balances:
             return
         creds = google_credentials(write=True)
         tab = cfg['sheets_tab'].replace("'", "''")
@@ -201,7 +204,17 @@ def export_balances(cycle_started):
         rows = ranges[1].get('values', [])
         if len(rows) >= 5000:
             raise RemoteError('Запись отменена: достигнут предел строк.')
-        data = balance_updates(header, rows, balances, cfg['sheets_tab'])
+        data = []
+        warnings = []
+        for asset, values in [('BNB', balances), ('USDT', token_balances)]:
+            if not values:
+                continue
+            try:
+                data.extend(balance_updates(header, rows, values, cfg['sheets_tab'], asset))
+            except RemoteError as exc:
+                warnings.append(str(exc))
+        if warnings:
+            set_status(sheets_export_error='; '.join(warnings))
         if not data:
             return
         # Refresh the mapping just before writing; don't reuse the import's row order.
@@ -214,8 +227,9 @@ def export_balances(cycle_started):
                                 {'valueInputOption': 'RAW', 'data': data})
         if result.get('totalUpdatedCells') != len(data):
             raise RemoteError('Google подтвердил не все обновления балансов.')
-        set_status(sheets_export_success=time.time(), sheets_export_count=len(data), sheets_export_error=None)
+        set_status(sheets_export_success=time.time(), sheets_export_count=len(data), sheets_export_error='; '.join(warnings) or None)
     except RemoteError as exc:
         set_status(sheets_export_error=str(exc))
     except Exception:
         set_status(sheets_export_error='Не удалось записать балансы. Проверьте заголовок столбца и права Google.')
+

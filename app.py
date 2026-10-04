@@ -27,7 +27,11 @@ DEFAULTS = {'interval': 30, 'threshold': '0.00000001', 'telegram_enabled': False
             'telegram_token': '', 'telegram_chat': '',
             'rpc_urls': ['https://bsc-dataseed-public.bnbchain.org'],
             'sheets_enabled': False, 'sheets_id': '', 'sheets_tab': 'Кошельки',
-            'sheets_interval': 300}
+            'sheets_interval': 300, 'usdt_enabled': True, 'usdt_threshold': '0.01'}
+
+USDT_CONTRACT = '0x55d398326f99059ff775485246999027b3197955'
+ASSET_FIELDS = {'BNB': ('balance', 'block', 'checked', 'error'),
+                'USDT': ('usdt_balance', 'usdt_block', 'usdt_checked', 'usdt_error')}
 
 DEFAULTS.update(EMAIL_DEFAULTS)
 
@@ -68,6 +72,24 @@ def init_db():
         CREATE TABLE IF NOT EXISTS status (key TEXT PRIMARY KEY, value TEXT NOT NULL);
         CREATE INDEX IF NOT EXISTS event_delivery ON events(delivery, retry_at);
         ''')
+        c.execute('BEGIN IMMEDIATE')
+        columns = {r['name'] for r in c.execute('PRAGMA table_info(wallets)')}
+        for name, kind in [('usdt_balance', 'TEXT'), ('usdt_block', 'INTEGER'),
+                           ('usdt_checked', 'REAL'), ('usdt_error', 'TEXT')]:
+            if name not in columns:
+                c.execute(f'ALTER TABLE wallets ADD COLUMN {name} {kind}')
+        if 'asset' not in {r['name'] for r in c.execute('PRAGMA table_info(events)')}:
+            c.execute("""CREATE TABLE events_assets (
+                id INTEGER PRIMARY KEY, wallet_id INTEGER NOT NULL, address TEXT NOT NULL,
+                name TEXT NOT NULL, old TEXT NOT NULL, new TEXT NOT NULL, delta TEXT NOT NULL,
+                block INTEGER NOT NULL, created REAL NOT NULL, delivery TEXT NOT NULL,
+                attempts INTEGER NOT NULL DEFAULT 0, retry_at REAL NOT NULL DEFAULT 0,
+                delivery_error TEXT, chat TEXT NOT NULL DEFAULT '',
+                asset TEXT NOT NULL DEFAULT 'BNB', UNIQUE(wallet_id, block, asset))""")
+            c.execute("INSERT INTO events_assets SELECT *, 'BNB' FROM events")
+            c.execute('DROP TABLE events')
+            c.execute('ALTER TABLE events_assets RENAME TO events')
+            c.execute('CREATE INDEX event_delivery ON events(delivery, retry_at)')
         for k, v in DEFAULTS.items():
             c.execute('INSERT OR IGNORE INTO settings VALUES (?,?)', (k, json.dumps(v)))
     os.chmod(DB, 0o600)
@@ -130,30 +152,50 @@ def telegram(s, text, chat=None):
     if not isinstance(r, dict) or not r.get('ok'):
         raise RemoteError('Telegram отклонил сообщение. Проверьте токен, Chat ID и /start.')
 
-def record_balance(wallet_id, amount, block, cfg):
+def token_uint(raw):
+    if not isinstance(raw, str) or not re.fullmatch(r'0x[0-9a-fA-F]{64}', raw):
+        raise RemoteError('USDT: некорректный ответ контракта (нужен uint256).')
+    return int(raw, 16)
+
+def usdt_decimals(call, url, block='finalized'):
+    decimals = token_uint(call(url, 'eth_call', [{'to': USDT_CONTRACT, 'data': '0x313ce567'}, block]))
+    if decimals != 18:
+        raise RemoteError('USDT: контракт вернул неожиданное число decimals. Проверка остановлена.')
+
+def usdt_balance(call, url, address, block):
+    if not re.fullmatch(r'0x[0-9a-fA-F]{40}', address):
+        raise ValueError('Некорректный адрес кошелька.')
+    data = '0x70a08231' + address[2:].lower().zfill(64)
+    return token_uint(call(url, 'eth_call', [{'to': USDT_CONTRACT, 'data': data}, block]))
+
+def record_balance(wallet_id, amount, block, cfg, asset='BNB'):
+    if asset not in ASSET_FIELDS:
+        raise ValueError('Неизвестный актив.')
+    balance_col, block_col, checked_col, error_col = ASSET_FIELDS[asset]
     if not isinstance(amount, int) or amount < 0 or amount >= 2**256:
         raise RemoteError('Некорректный баланс RPC.')
     with db() as c:
         c.execute('BEGIN IMMEDIATE')
         w = c.execute('SELECT * FROM wallets WHERE id=?', (wallet_id,)).fetchone()
-        if not w or (w['block'] is not None and block < w['block']):
+        if not w or (w[block_col] is not None and block < w[block_col]):
             return
-        if block == w['block']:
-            c.execute('UPDATE wallets SET checked=?,error=NULL WHERE id=?', (time.time(), wallet_id))
+        if block == w[block_col]:
+            c.execute(f'UPDATE wallets SET {checked_col}=?,{error_col}=NULL WHERE id=?', (time.time(), wallet_id))
             return
         now = time.time()
-        if w['balance'] is not None and int(w['balance']) != amount:
-            delta = amount - int(w['balance'])
-            eligible = delta > 0 and delta >= threshold_wei(cfg['threshold']) and w['notify']
+        if w[balance_col] is not None and int(w[balance_col]) != amount:
+            delta = amount - int(w[balance_col])
+            threshold = cfg['threshold'] if asset == 'BNB' else cfg['usdt_threshold']
+            eligible = delta > 0 and delta >= threshold_wei(threshold) and w['notify']
             send = eligible and cfg['telegram_enabled']
-            event = c.execute('''INSERT INTO events(wallet_id,address,name,old,new,delta,block,created,delivery,chat)
-                         VALUES (?,?,?,?,?,?,?,?,?,?)''',
-                      (w['id'], w['address'], w['name'], w['balance'], str(amount), str(delta),
-                       block, now, 'pending' if send else 'off', cfg['telegram_chat'] if send else ''))
+            event = c.execute("""INSERT INTO events(wallet_id,address,name,old,new,delta,block,created,delivery,chat,asset)
+                         VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                      (w['id'], w['address'], w['name'], w[balance_col], str(amount), str(delta),
+                       block, now, 'pending' if send else 'off', cfg['telegram_chat'] if send else '', asset))
             if eligible and cfg.get('email_enabled'):
                 c.execute('INSERT INTO email_outbox(event_id,recipient,sender,message_id) VALUES (?,?,?,?)',
                           (event.lastrowid, cfg['email_to'], cfg['email_from'], make_msgid()))
-        c.execute('UPDATE wallets SET balance=?,block=?,checked=?,error=NULL WHERE id=?',
+        c.execute(f'UPDATE wallets SET {balance_col}=?,{block_col}=?,{checked_col}=?,{error_col}=NULL WHERE id=?',
                   (str(amount), block, now, wallet_id))
 
 init_db()
@@ -258,11 +300,13 @@ def state():
     for w in wallets:
         w['bnb'] = bnb(w['balance']) if w['balance'] is not None else None
         w['usd'] = usd(w['balance'], price)
+        w['usdt'] = bnb(w['usdt_balance']) if w['usdt_balance'] is not None else None
     for e in events:
         e.update(delta_bnb=bnb(e['delta']), new_bnb=bnb(e['new']))
         e.pop('chat', None)
     total = sum(int(w['balance']) for w in wallets if w['balance'] is not None)
     return {'wallets': wallets, 'events': events, 'settings': cfg, 'status': status, 'total': bnb(total),
+            'total_usdt': bnb(sum(int(w['usdt_balance']) for w in wallets if w['usdt_balance'] is not None)),
             'total_usd': usd(total, price), 'price': {'bnb_usd': price, 'updated': price_at,
             'stale': price_stale, 'error': status.get('price_error'), 'source': SOURCE}}
 
@@ -322,28 +366,41 @@ def check_wallet(wid):
         return jsonify(error='Уже выполняется ручная проверка. Попробуйте через несколько секунд.'), 409
     try:
         cfg = settings()
-        last_error = 'RPC недоступен.'
-        for url in cfg['rpc_urls']:
-            try:
-                if int(rpc(url, 'eth_chainId', []), 16) != 56:
-                    raise RemoteError('RPC подключён не к BSC mainnet (chain ID 56).')
-                block = rpc(url, 'eth_getBlockByNumber', ['finalized', False])
-                if not isinstance(block, dict):
-                    raise RemoteError('RPC не поддерживает finalized. Укажите другой RPC.')
-                height = int(block['number'], 16)
-                if abs(time.time() - int(block['timestamp'], 16)) > 180:
-                    raise RemoteError('RPC отстаёт более чем на 3 минуты или часы сервера неверны.')
-                if w['block'] is not None and height < w['block']:
-                    raise RemoteError('RPC отстаёт от ранее проверенного блока.')
-                # Always read the balance, even when finalized has not advanced.
-                raw = rpc(url, 'eth_getBalance', [w['address'], hex(height)])
-                if not isinstance(raw, str) or not raw.startswith('0x'):
-                    raise RemoteError('RPC вернул некорректный баланс.')
-                record_balance(wid, int(raw, 16), height, cfg)
-                return {'ok': True}
-            except (RemoteError, ValueError, KeyError, TypeError) as exc:
-                last_error = str(exc) if isinstance(exc, RemoteError) else 'Некорректный ответ RPC.'
-        raise RemoteError(last_error)
+        errors = {}
+        for asset in (['BNB', 'USDT'] if cfg['usdt_enabled'] else ['BNB']):
+            balance_col, block_col, checked_col, error_col = ASSET_FIELDS[asset]
+            last_error = 'RPC недоступен.'
+            for url in cfg['rpc_urls']:
+                try:
+                    if int(rpc(url, 'eth_chainId', []), 16) != 56:
+                        raise RemoteError('RPC подключён не к BSC mainnet (chain ID 56).')
+                    if asset == 'USDT':
+                        usdt_decimals(rpc, url)
+                    block = rpc(url, 'eth_getBlockByNumber', ['finalized', False])
+                    height = int(block['number'], 16)
+                    if abs(time.time() - int(block['timestamp'], 16)) > 180:
+                        raise RemoteError('RPC отстаёт более чем на 3 минуты или часы сервера неверны.')
+                    if w[block_col] is not None and height < w[block_col]:
+                        raise RemoteError('RPC отстаёт от ранее проверенного блока.')
+                    if asset == 'USDT':
+                        amount = usdt_balance(rpc, url, w['address'], hex(height))
+                    else:
+                        raw = rpc(url, 'eth_getBalance', [w['address'], hex(height)])
+                        if not isinstance(raw, str) or not raw.startswith('0x'):
+                            raise RemoteError('RPC вернул некорректный баланс.')
+                        amount = int(raw, 16)
+                    record_balance(wid, amount, height, cfg, asset)
+                    break
+                except (RemoteError, ValueError, KeyError, TypeError) as exc:
+                    last_error = str(exc) if isinstance(exc, RemoteError) else 'Некорректный ответ RPC.'
+            else:
+                errors[asset] = last_error
+                with db() as c:
+                    c.execute(f'UPDATE wallets SET {error_col}=? WHERE id=?', (last_error, wid))
+        if errors:
+            raise RemoteError('; '.join(f'{asset}: {err}' for asset, err in errors.items()))
+        return {'ok': True}
+
     finally:
         manual_check_lock.release()
 
@@ -359,6 +416,11 @@ def save_settings():
         raise ValueError('Интервал: от 10 до 3600 секунд.')
     threshold = str(data.get('threshold', cfg['threshold']))
     threshold_wei(threshold)
+    usdt_threshold = str(data.get('usdt_threshold', cfg['usdt_threshold']))
+    threshold_wei(usdt_threshold)
+    usdt_enabled = data.get('usdt_enabled', cfg['usdt_enabled'])
+    if type(usdt_enabled) is not bool:
+        raise ValueError('Неверное значение мониторинга USDT.')
     urls = data.get('rpc_urls', cfg['rpc_urls'])
     if not isinstance(urls, list) or not 1 <= len(urls) <= 5:
         raise ValueError('Нужно от 1 до 5 RPC-адресов.')
@@ -401,7 +463,7 @@ def save_settings():
     if sheets_enabled and (not sheets_id or not (DATA / 'google-service-account.json').is_file()):
         raise ValueError('Укажите таблицу и сначала установите ключ через configure_google.py на VM.')
     email_cfg = validate_settings(data, cfg)
-    cfg.update(interval=interval, threshold=threshold, rpc_urls=urls, telegram_enabled=enabled,
+    cfg.update(usdt_enabled=usdt_enabled, usdt_threshold=usdt_threshold, interval=interval, threshold=threshold, rpc_urls=urls, telegram_enabled=enabled,
                telegram_token=token, telegram_chat=chat, sheets_enabled=sheets_enabled,
                sheets_id=sheets_id, sheets_tab=sheets_tab, sheets_interval=sheets_interval)
     cfg.update(email_cfg)
@@ -439,4 +501,5 @@ def test_telegram():
 def request_check():
     set_status(check_requested=True)
     return {'ok': True}
+
 

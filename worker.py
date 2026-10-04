@@ -3,7 +3,7 @@ from decimal import Decimal, InvalidOperation
 import signal
 import threading
 import time
-from app import DATA, RemoteError, bnb, db, record_balance, rpc, settings, set_status, telegram
+from app import ASSET_FIELDS, usdt_balance, usdt_decimals, DATA, RemoteError, bnb, db, record_balance, rpc, settings, set_status, telegram
 from sheets_sync import sync_once, export_balances
 from prices import fetch_quote, usd
 from email_notifications import send_email, EmailError
@@ -45,7 +45,10 @@ def check_once():
         if not wallets:
             set_status(last_cycle=time.time(), error=None, wallet_count=0)
             return
-        remaining = {w['id']: w for w in wallets}
+        assets = ['BNB', 'USDT'] if cfg['usdt_enabled'] else ['BNB']
+        remaining = {(w['id'], asset): w for w in wallets for asset in assets}
+        asset_errors = {}
+
         last_error = 'RPC недоступен.'
         used = None
         for index, url in enumerate(cfg['rpc_urls']):
@@ -55,11 +58,16 @@ def check_once():
                 heartbeat()
                 if int(rpc(url, 'eth_chainId', []), 16) != 56:
                     raise RemoteError('RPC подключён не к BSC mainnet (chain ID 56).')
-                for wid, w in list(remaining.items()):
+                token_verified = False
+                for (wid, asset), w in list(remaining.items()):
+                    balance_col, block_col, checked_col, error_col = ASSET_FIELDS[asset]
                     if stop.is_set():
                         break
                     heartbeat()
                     try:
+                        if asset == 'USDT' and not token_verified:
+                            usdt_decimals(rpc, url)
+                            token_verified = True
                         # Public RPCs may discard old state during a long wallet sweep.
                         # Keep the balance tied to an explicit, freshly finalized height.
                         block = rpc(url, 'eth_getBlockByNumber', ['finalized', False])
@@ -68,20 +76,25 @@ def check_once():
                         height = int(block['number'], 16)
                         if abs(time.time() - int(block['timestamp'], 16)) > 180:
                             raise RemoteError('RPC отстаёт более чем на 3 минуты или часы сервера неверны.')
-                        if w['block'] is not None and height < w['block']:
+                        if w[block_col] is not None and height < w[block_col]:
                             raise RemoteError('RPC отстаёт от ранее проверенного блока.')
-                        if w['block'] is not None and height == w['block']:
+                        if w[block_col] is not None and height == w[block_col]:
                             with db() as c:
-                                c.execute('UPDATE wallets SET checked=?,error=NULL WHERE id=?', (time.time(), wid))
+                                c.execute(f'UPDATE wallets SET {checked_col}=?,{error_col}=NULL WHERE id=?', (time.time(), wid))
                         else:
-                            raw = rpc(url, 'eth_getBalance', [w['address'], hex(height)])
-                            if not isinstance(raw, str) or not raw.startswith('0x'):
-                                raise RemoteError('RPC вернул некорректный баланс.')
-                            record_balance(wid, int(raw, 16), height, cfg)
-                        remaining.pop(wid)
+                            if asset == 'USDT':
+                                amount = usdt_balance(rpc, url, w['address'], hex(height))
+                            else:
+                                raw = rpc(url, 'eth_getBalance', [w['address'], hex(height)])
+                                if not isinstance(raw, str) or not raw.startswith('0x'):
+                                    raise RemoteError('RPC вернул некорректный баланс.')
+                                amount = int(raw, 16)
+                            record_balance(wid, amount, height, cfg, asset)
+                        remaining.pop((wid, asset))
                         used = index + 1
                     except (RemoteError, ValueError, KeyError, TypeError) as exc:
                         last_error = str(exc) if isinstance(exc, RemoteError) else 'Некорректный ответ RPC.'
+                        asset_errors[(wid, asset)] = last_error
                     # Pace public RPC requests: one second plus response time per wallet.
                     stop.wait(1.0)
             except (RemoteError, ValueError, KeyError, TypeError) as exc:
@@ -94,9 +107,11 @@ def check_once():
             return
         if remaining:
             with db() as c:
-                for wid in remaining:
-                    c.execute('UPDATE wallets SET error=? WHERE id=?', (last_error, wid))
-        set_status(last_cycle=time.time(), error=last_error if remaining else None,
+                for wid, asset in remaining:
+                    error_col = ASSET_FIELDS[asset][3]
+                    c.execute(f'UPDATE wallets SET {error_col}=? WHERE id=?',
+                              (asset_errors.get((wid, asset), last_error), wid))
+        set_status(last_cycle=time.time(), error=('; '.join(sorted({asset for _, asset in remaining})) + ': ' + last_error) if remaining else None,
                    rpc_index=used, wallet_count=len(wallets), failed=len(remaining))
     finally:
         set_status(running=False)
@@ -119,9 +134,11 @@ def notification_usd(delta):
         return ' (USD: курс недоступен)'
 
 def notification_text(e):
-    return (f"🟢 Увеличение баланса BNB · событие #{e['id']}\n"
+    asset = e.get('asset', 'BNB')
+    valuation = notification_usd(e['delta']) if asset == 'BNB' else ''
+    return (f"🟢 Увеличение баланса {asset} · событие #{e['id']}\n"
                 f"{e['name']}\n{e['address']}\n\n"
-                f"Изменение: +{bnb(e['delta'])} BNB{notification_usd(e['delta'])}\nБаланс: {bnb(e['new'])} BNB\n"
+                f"Изменение: +{bnb(e['delta'])} {asset}{valuation}\nБаланс: {bnb(e['new'])} {asset}\n"
                 f"Блок: {e['block']}\nhttps://bscscan.com/address/{e['address']}\n\n"
                 'Это разница балансов между проверками, не сумма отдельной транзакции.')
 
@@ -270,5 +287,6 @@ if __name__ == '__main__':
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     signal.signal(signal.SIGINT, lambda *_: stop.set())
     run()
+
 
 

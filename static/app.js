@@ -31,9 +31,9 @@ function escapeHtml(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;',
 const date=t=>t?new Date(t*1000).toLocaleString('ru-RU'):'Ещё не проверен';
 const short=a=>a.slice(0,8)+'…'+a.slice(-6);
 
-const sortModes = ['balance-desc', 'balance-asc', 'name-asc', 'name-desc'];
+const sortModes = ['balance-desc', 'balance-asc', 'name-asc', 'name-desc', 'usdt-desc', 'usdt-asc'];
 let walletSort = 'balance-desc', walletRows = [];
-let hideSmallBalances = false;
+let hideSmallBalances = false, usdtEnabled = true;
 try {
   const saved = localStorage.getItem('bnb-monitor-wallet-sort');
   if (sortModes.includes(saved)) walletSort = saved;
@@ -43,6 +43,7 @@ function matchesBalanceFilter(w) {
   if (!hideSmallBalances) return true;
   // The server marks positive amounts below one cent before rounding USD.
   // Unknown balances/quotes cannot establish that a wallet meets the threshold.
+  if (usdtEnabled && w.usdt_balance != null && BigInt(w.usdt_balance) >= 10000000000000000n) return true;
   return w.balance != null && BigInt(w.balance) > 0n
     && typeof w.usd === 'string' && w.usd.startsWith('$') && w.usd !== '$0.00';
 }
@@ -50,20 +51,21 @@ function compareWallets(a, b) {
   const nameOrder = String(a.name || a.address).localeCompare(String(b.name || b.address), 'ru', {sensitivity:'base'});
   const tie = nameOrder || a.address.localeCompare(b.address);
   if (walletSort.startsWith('name-')) return walletSort === 'name-desc' ? -tie : tie;
-  if (a.balance == null || b.balance == null) {
-    if (a.balance == null && b.balance == null) return tie;
-    return a.balance == null ? 1 : -1;
+  const field = walletSort.startsWith('usdt-') ? 'usdt_balance' : 'balance';
+  if (a[field] == null || b[field] == null) {
+    if (a[field] == null && b[field] == null) return tie;
+    return a[field] == null ? 1 : -1;
   }
-  const av = BigInt(a.balance), bv = BigInt(b.balance);
+  const av = BigInt(a[field]), bv = BigInt(b[field]);
   const order = av < bv ? -1 : av > bv ? 1 : 0;
-  return (walletSort === 'balance-desc' ? -order : order) || tie;
+  return (walletSort.endsWith('-desc') ? -order : order) || tie;
 }
 function renderWallets() {
  const wallets = walletRows.filter(matchesBalanceFilter).sort(compareWallets);
  $('wallet-empty').hidden=walletRows.length>0;
  $('wallet-filter-empty').hidden=walletRows.length===0 || wallets.length>0;
  $('wallet-visible-count').textContent=hideSmallBalances?'Показано: '+wallets.length+' из '+walletRows.length:'';
- $('wallet-list').innerHTML=wallets.map(w=>`<tr><td><div class="name">${escapeHtml(w.name)} <button class="quiet" data-copy="${escapeHtml(w.name)}" data-copy-kind="name" title="Копировать название кошелька" aria-label="Копировать название кошелька">⧉</button></div><small><a class="mono" title="${escapeHtml(w.address)}" href="https://bscscan.com/address/${w.address}" target="_blank" rel="noopener noreferrer">${short(w.address)} ↗</a> <button class="quiet" data-copy="${w.address}" title="Копировать адрес">⧉</button></small></td><td class="mono">${w.bnb===null?'—':escapeHtml(w.bnb)}</td><td class="mono">${escapeHtml(w.usd ?? '—')}</td><td><small>${escapeHtml(date(w.checked))}</small>${w.error?`<small class="negative">${escapeHtml(w.error)}</small>`:''}</td><td><input aria-label="Уведомления ${escapeHtml(w.name)}" type="checkbox" data-notify="${w.id}" ${w.notify?'checked':''}></td><td><button class="quiet" data-check="${w.id}" title="Принудительно обновить баланс сейчас" aria-label="Обновить баланс ${escapeHtml(w.name)}" ${checkingWallet !== null ? 'disabled' : ''}>${checkingWallet === String(w.id) ? 'Обновление…' : '↻ Обновить'}</button><button class="quiet" data-rename="${w.id}" data-name="${escapeHtml(w.name)}" title="Переименовать">✎</button><button class="quiet danger" data-delete="${w.id}" title="Удалить">×</button></td></tr>`).join('');
+ $('wallet-list').innerHTML=wallets.map(w=>`<tr><td><div class="name">${escapeHtml(w.name)} <button class="quiet" data-copy="${escapeHtml(w.name)}" data-copy-kind="name" title="Копировать название кошелька" aria-label="Копировать название кошелька">⧉</button></div><small><a class="mono" title="${escapeHtml(w.address)}" href="https://bscscan.com/address/${w.address}" target="_blank" rel="noopener noreferrer">${short(w.address)} ↗</a> <button class="quiet" data-copy="${w.address}" title="Копировать адрес">⧉</button></small></td><td class="mono">${w.bnb===null?'—':escapeHtml(w.bnb)}</td><td class="mono">${escapeHtml(w.usd ?? '—')}</td><td class="mono">${usdtEnabled ? escapeHtml(w.usdt ?? '—') : 'Выключен'}<small>${usdtEnabled ? escapeHtml(date(w.usdt_checked)) : ''}</small>${usdtEnabled && w.usdt_error?`<small class="negative">${escapeHtml(w.usdt_error)}</small>`:''}</td><td><small>BNB: ${escapeHtml(date(w.checked))}</small>${w.error?`<small class="negative">${escapeHtml(w.error)}</small>`:''}</td><td><input aria-label="Уведомления ${escapeHtml(w.name)}" type="checkbox" data-notify="${w.id}" ${w.notify?'checked':''}></td><td><button class="quiet" data-check="${w.id}" title="Принудительно обновить баланс сейчас" aria-label="Обновить баланс ${escapeHtml(w.name)}" ${checkingWallet !== null ? 'disabled' : ''}>${checkingWallet === String(w.id) ? 'Обновление…' : '↻ Обновить'}</button><button class="quiet" data-rename="${w.id}" data-name="${escapeHtml(w.name)}" title="Переименовать">✎</button><button class="quiet danger" data-delete="${w.id}" title="Удалить">×</button></td></tr>`).join('');
 }
 $('wallet-sort').value = walletSort;
 $('hide-small-balances').checked = hideSmallBalances;
@@ -91,10 +93,13 @@ async function refresh(){
  $('price-status').className='small '+(quote.stale || quote.error?'negative':'muted');
  const s=d.status, stale=!s.worker_seen||Date.now()/1000-s.worker_seen>180;
  const g=d.settings;
+ usdtEnabled=g.usdt_enabled;
+ $('total-usdt').textContent=usdtEnabled ? d.total_usdt : 'Выключен';
+ $('usdt-count').textContent=usdtEnabled ? 'Проверено: '+d.wallets.filter(w=>w.usdt_balance!==null).length+' из '+d.wallets.length : 'Включите в настройках';
  $('google-key-status').textContent=g.google_key_set?'Ключ Google установлен на сервере.':'Ключ не установлен. Выполните configure_google.py на VM (инструкция в README).';
  $('google-status').textContent=s.sheets_error?'Ошибка: '+s.sheets_error:s.sheets_success?'Последняя синхронизация: '+date(s.sheets_success)+' · адресов: '+s.sheets_counts.valid+' · добавлено: '+s.sheets_counts.added+' · переименовано: '+s.sheets_counts.renamed+' · неверных строк: '+s.sheets_counts.invalid:'Синхронизации ещё не было.';
 
- if(s.sheets_export_error) $('google-status').textContent+=' · Запись BNB: '+s.sheets_export_error;
+ if(s.sheets_export_error) $('google-status').textContent+=' · Запись балансов: '+s.sheets_export_error;
  else if(s.sheets_export_success) $('google-status').textContent+=' · Балансы записаны: '+date(s.sheets_export_success)+' · ячеек: '+s.sheets_export_count;
  $('google-status').className='small '+(s.sheets_error||s.sheets_export_error?'negative':'muted');
  if(!loadedGoogle){$('sheets-enabled').checked=g.sheets_enabled;$('sheets-id').value=g.sheets_id;$('sheets-tab').value=g.sheets_tab;$('sheets-interval').value=g.sheets_interval;loadedGoogle=true;}
@@ -115,8 +120,8 @@ async function refresh(){
  $('email-status').className='small '+(s.email_error?'negative':'muted');
  const delivery={pending:'В очереди',sent:'Отправлено',off:'Не требуется',cancelled:'Отменено',suppressed:'Не требуется — доставлено в Telegram'};
  $('event-empty').hidden=d.events.length>0;
- $('event-list').innerHTML=d.events.map(e=>`<tr><td>${escapeHtml(date(e.created))}<small>${escapeHtml(e.name)} · ${short(e.address)}</small></td><td class="mono ${e.delta.startsWith('-')?'negative':'positive'}">${e.delta.startsWith('-')?'':'+'}${escapeHtml(e.delta_bnb)}</td><td class="mono">${escapeHtml(e.new_bnb)}</td><td><a href="https://bscscan.com/block/${e.block}" target="_blank" rel="noopener noreferrer">${e.block} ↗</a></td><td>Telegram: ${delivery[e.delivery]||escapeHtml(e.delivery)}${e.delivery_error?`<small class="negative">${escapeHtml(e.delivery_error)} · попыток: ${e.attempts}</small>`:''}<small>Email: ${e.email_delivery==='pending' && e.delivery==='pending' && e.attempts<3 ? 'Резерв — ожидает Telegram' : (delivery[e.email_delivery]||'Не требуется')}</small>${e.email_error?`<small class="negative">${escapeHtml(e.email_error)} · попыток: ${e.email_attempts}</small>`:''}</td></tr>`).join('');
- if(!loadedSettings){const c=d.settings;$('interval').value=c.interval;$('threshold').value=c.threshold;$('rpc-urls').value=c.rpc_urls.join('\n');$('telegram-enabled').checked=c.telegram_enabled;$('telegram-chat').value=c.telegram_chat;$('token-hint').textContent=c.telegram_token_set?'Токен сохранён. Пустое поле оставит его без изменений.':'Токен ещё не задан.';loadedSettings=true;}
+ $('event-list').innerHTML=d.events.map(e=>`<tr><td>${escapeHtml(date(e.created))}<small>${escapeHtml(e.name)} · ${short(e.address)}</small></td><td class="mono ${e.delta.startsWith('-')?'negative':'positive'}">${e.delta.startsWith('-')?'':'+'}${escapeHtml(e.delta_bnb)} ${escapeHtml(e.asset)}</td><td class="mono">${escapeHtml(e.new_bnb)} ${escapeHtml(e.asset)}</td><td><a href="https://bscscan.com/block/${e.block}" target="_blank" rel="noopener noreferrer">${e.block} ↗</a></td><td>Telegram: ${delivery[e.delivery]||escapeHtml(e.delivery)}${e.delivery_error?`<small class="negative">${escapeHtml(e.delivery_error)} · попыток: ${e.attempts}</small>`:''}<small>Email: ${e.email_delivery==='pending' && e.delivery==='pending' && e.attempts<3 ? 'Резерв — ожидает Telegram' : (delivery[e.email_delivery]||'Не требуется')}</small>${e.email_error?`<small class="negative">${escapeHtml(e.email_error)} · попыток: ${e.email_attempts}</small>`:''}</td></tr>`).join('');
+ if(!loadedSettings){const c=d.settings;$('interval').value=c.interval;$('threshold').value=c.threshold;$('usdt-threshold').value=c.usdt_threshold;$('usdt-enabled').checked=c.usdt_enabled;$('rpc-urls').value=c.rpc_urls.join('\n');$('telegram-enabled').checked=c.telegram_enabled;$('telegram-chat').value=c.telegram_chat;$('token-hint').textContent=c.telegram_token_set?'Токен сохранён. Пустое поле оставит его без изменений.':'Токен ещё не задан.';loadedSettings=true;}
  }catch(e){toast(e.message,true);}finally{refreshing=false;}
 }
 $('login-form').addEventListener('submit',async e=>{e.preventDefault();const b=e.submitter;b.disabled=true;try{const d=await api('login','POST',{password:$('password').value});csrf=d.csrf;$('password').value='';loggedIn=true;loadedSettings=false;showAuth();await refresh();}catch(e){toast(e.message,true);}finally{b.disabled=false;}});
@@ -126,7 +131,7 @@ $('wallet-form').onsubmit=async e=>{e.preventDefault();const wallets=$('addresse
 $('wallet-list').addEventListener('click',async e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.check){if(checkingWallet !== null)return;checkingWallet=b.dataset.check;renderWallets();try{await api('wallets/'+checkingWallet+'/check','POST',{});toast('Баланс кошелька обновлён');}catch(e){toast(e.message,true);}finally{checkingWallet=null;renderWallets();await refresh();}return;}try{if(b.hasAttribute('data-copy')){const isName=b.dataset.copyKind==='name';try{await navigator.clipboard.writeText(b.dataset.copy);toast(isName?'Название кошелька скопировано':'Адрес скопирован');}catch{prompt(isName?'Скопируйте название кошелька:':'Скопируйте адрес:',b.dataset.copy);}return;}if(b.dataset.delete){if(!confirm('Удалить кошелёк из мониторинга? История сохранится, ожидающие уведомления отменятся.'))return;await api('wallets/'+b.dataset.delete,'DELETE',{});}if(b.dataset.rename){const name=prompt('Название кошелька:',b.dataset.name);if(name===null)return;await api('wallets/'+b.dataset.rename,'POST',{name});}await refresh();}catch(e){toast(e.message,true);}});
 $('wallet-list').addEventListener('change',async e=>{const input=e.target;if(!input.dataset.notify)return;try{await api('wallets/'+input.dataset.notify,'POST',{notify:input.checked});}catch(e){input.checked=!input.checked;toast(e.message,true);}});
 $('check').onclick=async()=>{try{await api('check','POST',{});toast('Проверка запрошена. Результат обновится автоматически.');}catch(e){toast(e.message,true);}};
-$('settings-form').onsubmit=async e=>{e.preventDefault();try{await api('settings','POST',{interval:Number($('interval').value),threshold:$('threshold').value.trim(),rpc_urls:$('rpc-urls').value.split('\n').map(s=>s.trim()).filter(Boolean),telegram_enabled:$('telegram-enabled').checked,telegram_token:$('telegram-token').value.trim(),telegram_chat:$('telegram-chat').value.trim(),clear_token:$('clear-token').checked});$('telegram-token').value='';$('clear-token').checked=false;loadedSettings=false;toast('Настройки сохранены');await refresh();}catch(e){toast(e.message,true);}};
+$('settings-form').onsubmit=async e=>{e.preventDefault();try{await api('settings','POST',{interval:Number($('interval').value),threshold:$('threshold').value.trim(),usdt_threshold:$('usdt-threshold').value.trim(),usdt_enabled:$('usdt-enabled').checked,rpc_urls:$('rpc-urls').value.split('\n').map(s=>s.trim()).filter(Boolean),telegram_enabled:$('telegram-enabled').checked,telegram_token:$('telegram-token').value.trim(),telegram_chat:$('telegram-chat').value.trim(),clear_token:$('clear-token').checked});$('telegram-token').value='';$('clear-token').checked=false;loadedSettings=false;toast('Настройки сохранены');await refresh();}catch(e){toast(e.message,true);}};
 $('telegram-test').onclick=async()=>{const b=$('telegram-test');b.disabled=true;try{await api('telegram/test','POST',{});toast('Тестовое сообщение отправлено');}catch(e){toast(e.message,true);}finally{b.disabled=false;}};
 (async()=>{try{const s=await api('session');csrf=s.csrf;loggedIn=s.authenticated;showAuth();await refresh();}catch(e){toast(e.message,true);}})();
 $('google-form').onsubmit=async e=>{e.preventDefault();try{await api('settings','POST',{sheets_enabled:$('sheets-enabled').checked,sheets_id:$('sheets-id').value.trim(),sheets_tab:$('sheets-tab').value.trim(),sheets_interval:Number($('sheets-interval').value)});loadedGoogle=false;toast('Настройки Google сохранены');await refresh();}catch(e){toast(e.message,true);}};
@@ -149,4 +154,5 @@ $('email-test').onclick=async()=>{
  try{await api('email/test','POST',{});toast('Тестовое письмо принято SMTP. Проверьте входящие и спам.');}
  catch(err){toast(err.message,true);}finally{b.disabled=false;}
 };
+
 
