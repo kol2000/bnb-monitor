@@ -80,6 +80,13 @@ $('wallet-sort').addEventListener('change', e => {
   renderWallets();
 });
 
+function formatUsdtTotal(value) {
+  const [whole, fraction = ''] = String(value).split('.');
+  const digits = fraction.padEnd(3, '0');
+  const cents = BigInt(whole) * 100n + BigInt(digits.slice(0, 2)) + (digits[2] >= '5' ? 1n : 0n);
+  return (cents / 100n).toLocaleString('ru-RU') + ',' + String(cents % 100n).padStart(2, '0');
+}
+
 async function refresh(){
  if(!loggedIn||refreshing)return;refreshing=true;
  try{
@@ -94,7 +101,7 @@ async function refresh(){
  const s=d.status, stale=!s.worker_seen||Date.now()/1000-s.worker_seen>180;
  const g=d.settings;
  usdtEnabled=g.usdt_enabled;
- $('total-usdt').textContent=usdtEnabled ? d.total_usdt : 'Выключен';
+ $('total-usdt').textContent=usdtEnabled ? formatUsdtTotal(d.total_usdt) : 'Выключен';
  $('usdt-count').textContent=usdtEnabled ? 'Проверено: '+d.wallets.filter(w=>w.usdt_balance!==null).length+' из '+d.wallets.length : 'Включите в настройках';
  $('google-key-status').textContent=g.google_key_set?'Ключ Google установлен на сервере.':'Ключ не установлен. Выполните configure_google.py на VM (инструкция в README).';
  $('google-status').textContent=s.sheets_error?'Ошибка: '+s.sheets_error:s.sheets_success?'Последняя синхронизация: '+date(s.sheets_success)+' · адресов: '+s.sheets_counts.valid+' · добавлено: '+s.sheets_counts.added+' · переименовано: '+s.sheets_counts.renamed+' · неверных строк: '+s.sheets_counts.invalid:'Синхронизации ещё не было.';
