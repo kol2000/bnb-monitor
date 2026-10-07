@@ -30,3 +30,6 @@
 /* Two compact check timestamps in one column; details on hover. */
 .wallet-checks .check-line{white-space:nowrap;margin-top:0;line-height:1.7;font-variant-numeric:tabular-nums}
 .wallet-actions{display:grid;grid-template-columns:max-content max-content;align-items:center;gap:2px 4px}.wallet-actions .wallet-refresh{grid-column:1;grid-row:1;text-align:left}.wallet-actions .wallet-delete{grid-column:1;grid-row:2;text-align:left}
+
+/* Selectable for HTTP clipboard fallback, without moving the page. */
+.clipboard-copy-buffer{position:fixed;top:0;left:0;width:1px;height:1px;padding:0;border:0;opacity:0;pointer-events:none;font-size:16px}

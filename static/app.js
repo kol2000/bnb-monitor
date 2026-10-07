@@ -27,6 +27,35 @@ async function api(path, method='GET', body) {
   let d; try {d=await r.json();} catch {throw new Error('Сервер вернул неверный ответ. Проверьте соединение.');}
   if(!r.ok){if(r.status===401 && path!=='login'){loggedIn=false;showAuth();}throw new Error(d.error||'Ошибка запроса');}return d;
 }
+async function copyText(text) {
+  // Clipboard API requires HTTPS; LAN HTTP uses the synchronous copy command.
+  if (window.isSecureContext && navigator.clipboard?.writeText) {
+    try { await navigator.clipboard.writeText(text); return; } catch {}
+  }
+  const previousFocus = document.activeElement;
+  const selection = window.getSelection();
+  const ranges = selection ? Array.from({length:selection.rangeCount}, (_, i)=>selection.getRangeAt(i).cloneRange()) : [];
+  const field = document.createElement('textarea');
+  field.value = text;
+  field.readOnly = true;
+  field.className = 'clipboard-copy-buffer';
+  field.setAttribute('aria-label', 'Копирование');
+  document.body.appendChild(field);
+  try {
+    field.focus({preventScroll:true});
+    field.select();
+    field.setSelectionRange(0, field.value.length);
+    if (!document.execCommand('copy')) throw new Error('Браузер запретил копирование. Проверьте разрешения буфера обмена.');
+  } finally {
+    field.remove();
+    previousFocus?.focus({preventScroll:true});
+    if (selection) {
+      selection.removeAllRanges();
+      for (const range of ranges) selection.addRange(range);
+    }
+  }
+}
+
 function showAuth(){$('login').hidden=loggedIn;$('dashboard').hidden=!loggedIn;$('logout').hidden=!loggedIn;}
 function escapeHtml(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 const date=t=>t?new Date(t*1000).toLocaleString('ru-RU'):'Ещё не проверен';
@@ -144,7 +173,7 @@ $('login-form').addEventListener('submit',async e=>{e.preventDefault();const b=e
 $('logout').onclick=async()=>{try{await api('logout','POST',{});location.reload();}catch(e){toast(e.message,true);}};
 document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-tab]').forEach(x=>{x.classList.toggle('active',x===b);$('tab-'+x.dataset.tab).hidden=x!==b;});if(b.dataset.tab==='withdrawals')refreshWithdrawals();});
 $('wallet-form').onsubmit=async e=>{e.preventDefault();const wallets=$('addresses').value.split('\n').map(s=>s.trim()).filter(Boolean).map(s=>{const [address,...parts]=s.split(/\s+/);return {address,name:parts.join(' ')};});try{const d=await api('wallets','POST',{wallets});$('addresses').value='';toast('Добавлено: '+d.added+'. Повторы пропущены.');await api('check','POST',{});await refresh();}catch(e){toast(e.message,true);}};
-$('wallet-list').addEventListener('click',async e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.check){if(checkingWallet !== null)return;checkingWallet=b.dataset.check;renderWallets();try{await api('wallets/'+checkingWallet+'/check','POST',{});toast('Баланс кошелька обновлён');}catch(e){toast(e.message,true);}finally{checkingWallet=null;renderWallets();await refresh();}return;}try{if(b.hasAttribute('data-copy')){const isName=b.dataset.copyKind==='name';try{await navigator.clipboard.writeText(b.dataset.copy);toast(isName?'Название кошелька скопировано':'Адрес скопирован');}catch{prompt(isName?'Скопируйте название кошелька:':'Скопируйте адрес:',b.dataset.copy);}return;}if(b.dataset.delete){if(!confirm('Удалить кошелёк из мониторинга? История сохранится, ожидающие уведомления отменятся.'))return;await api('wallets/'+b.dataset.delete,'DELETE',{});}if(b.dataset.rename){const name=prompt('Название кошелька:',b.dataset.name);if(name===null)return;await api('wallets/'+b.dataset.rename,'POST',{name});}await refresh();}catch(e){toast(e.message,true);}});
+$('wallet-list').addEventListener('click',async e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.check){if(checkingWallet !== null)return;checkingWallet=b.dataset.check;renderWallets();try{await api('wallets/'+checkingWallet+'/check','POST',{});toast('Баланс кошелька обновлён');}catch(e){toast(e.message,true);}finally{checkingWallet=null;renderWallets();await refresh();}return;}try{if(b.hasAttribute('data-copy')){const isName=b.dataset.copyKind==='name';await copyText(b.dataset.copy);toast(isName?'Название кошелька скопировано':'Адрес скопирован');return;}if(b.dataset.delete){if(!confirm('Удалить кошелёк из мониторинга? История сохранится, ожидающие уведомления отменятся.'))return;await api('wallets/'+b.dataset.delete,'DELETE',{});}if(b.dataset.rename){const name=prompt('Название кошелька:',b.dataset.name);if(name===null)return;await api('wallets/'+b.dataset.rename,'POST',{name});}await refresh();}catch(e){toast(e.message,true);}});
 $('wallet-list').addEventListener('change',async e=>{const input=e.target;if(!input.dataset.notify)return;try{await api('wallets/'+input.dataset.notify,'POST',{notify:input.checked});}catch(e){input.checked=!input.checked;toast(e.message,true);}});
 $('check').onclick=async()=>{try{await api('check','POST',{});toast('Проверка запрошена. Результат обновится автоматически.');}catch(e){toast(e.message,true);}};
 $('settings-form').onsubmit=async e=>{e.preventDefault();try{await api('settings','POST',{interval:Number($('interval').value),threshold:$('threshold').value.trim(),usdt_threshold:$('usdt-threshold').value.trim(),usdt_enabled:$('usdt-enabled').checked,rpc_urls:$('rpc-urls').value.split('\n').map(s=>s.trim()).filter(Boolean),telegram_enabled:$('telegram-enabled').checked,telegram_token:$('telegram-token').value.trim(),telegram_chat:$('telegram-chat').value.trim(),clear_token:$('clear-token').checked});$('telegram-token').value='';$('clear-token').checked=false;loadedSettings=false;toast('Настройки сохранены');await refresh();}catch(e){toast(e.message,true);}};
