@@ -6,6 +6,7 @@ import time
 from app import ASSET_FIELDS, usdt_balance, usdt_decimals, DATA, RemoteError, bnb, db, record_balance, rpc, settings, set_status, telegram
 from sheets_sync import sync_once, export_balances
 from prices import fetch_quote, usd
+import withdrawals
 from email_notifications import send_email, EmailError
 
 stop = threading.Event()
@@ -249,6 +250,7 @@ def run():
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         email_thread = threading.Thread(target=email_loop, name='email-delivery', daemon=True)
         email_thread.start()
+        threading.Thread(target=withdrawals.run, args=(stop,), name='bnb-withdrawals', daemon=True).start()
         next_check = 0
         next_sync = 0
         next_price = 0
@@ -291,6 +293,7 @@ if __name__ == '__main__':
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     signal.signal(signal.SIGINT, lambda *_: stop.set())
     run()
+
 
 
 

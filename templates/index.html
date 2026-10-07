@@ -8,7 +8,7 @@
 <body>
 <header><div class="brand"><span class="logo">B</span><div>BNB Monitor<small>Личный мониторинг кошельков</small></div></div><div class="header-right"><select id="theme-select" class="theme-select" aria-label="Тема оформления"><option value="dark">☾ Тёмная</option><option value="light">☀ Светлая</option></select><span class="network">● BSC MAINNET · 56</span><button id="logout" class="quiet" hidden>Выйти</button></div></header>
 <main>
-  <section id="login" class="login card" hidden><p class="eyebrow">ВАШИ КОШЕЛЬКИ ПОД КОНТРОЛЕМ</p><h1>Добро пожаловать</h1><p class="muted">Введите пароль, заданный при установке.</p><form id="login-form"><label>Пароль<input id="password" type="password" autocomplete="current-password" required></label><button type="submit">Войти в панель →</button></form><p class="muted small">Только публичные адреса. Приложению не нужны ключи от кошельков.</p></section>
+  <section id="login" class="login card" hidden><p class="eyebrow">ВАШИ КОШЕЛЬКИ ПОД КОНТРОЛЕМ</p><h1>Добро пожаловать</h1><p class="muted">Введите пароль, заданный при установке.</p><form id="login-form"><label>Пароль<input id="password" type="password" autocomplete="current-password" required></label><button type="submit">Войти в панель →</button></form><p class="muted small">Мониторинг и вывод BNB. Вход только для владельца кошельков.</p></section>
   <div id="dashboard" hidden>
     <div class="page-title"><div><p class="eyebrow">ОБЗОР АКТИВОВ</p><h1>Мои кошельки</h1><p class="muted">BNB и USDT в сети BNB Smart Chain</p></div><button id="check" class="secondary">↻ Проверить сейчас</button></div>
     <div class="stats"><section class="card"><span class="muted">Общий баланс BNB</span><div class="balance" id="total">—</div><div id="total-usd">USD —</div><small>BNB · по последним успешным проверкам</small></section><section class="card"><span class="muted">Общий баланс USDT</span><div class="balance" id="total-usdt">—</div><small id="usdt-count">Ожидают проверки</small></section><section class="card"><span class="muted">Адресов в списке</span><div class="balance" id="count">0</div><small id="checked-count">Ожидают проверки</small></section><section class="card"><span class="muted">Состояние мониторинга</span><div class="status-title" id="monitor-status">Ожидание</div><small id="last-check">—</small></section></div>
@@ -17,6 +17,7 @@
     <p class="notice">ⓘ Отслеживаем <strong>изменение баланса</strong>, не каждую транзакцию. Поступление и списание между проверками могут взаимно скрыться. Первый баланс — точка отсчёта, без уведомления.</p>
     <nav class="tabs"><button class="tab active" data-tab="wallets">Кошельки</button><button class="tab" data-tab="history">История изменений</button><button class="tab" data-tab="settings">Настройки</button></nav>
     <section id="tab-wallets">
+      <div id="withdrawal-history" class="card" hidden><h2>Вывод BNB</h2><div id="withdrawal-items"></div></div>
       <div class="card add-card"><div><h2>Добавить кошельки</h2><p class="muted small">Один адрес на строку. Можно добавить название через пробел.</p></div><form id="wallet-form"><textarea id="addresses" rows="3" placeholder="0x… Основной кошелёк&#10;0x… Резервный" required spellcheck="false"></textarea><button type="submit">+ Добавить адреса</button></form></div>
       <label class="wallet-sort-label" for="wallet-sort">Сортировка кошельков
         <select id="wallet-sort">
@@ -39,6 +40,13 @@
       <p class="muted small">Столбец A — имя/email, B — BSC-адрес. Новые адреса добавляются, имена обновляются. Раз в 24 часа все адреса, отсутствующие в таблице, удаляются из мониторинга, включая добавленные вручную. История сохраняется. Пустой лист удалит все кошельки при очередной сверке. При ошибке чтения или неверных адресах удаление отменяется. Если удалить кошелёк только в панели, синхронизация добавит его снова.</p>
       <p class="muted small">Для записи балансов добавьте в первую строку заголовки «остаток BNB (BSC)» и «остаток USDT (BSC)» в разные свободные столбцы после A и B. Приложение не создаёт столбцы автоматически.</p><p id="google-key-status" class="muted small"></p><p id="google-status" class="small"></p>
       <div class="save-bar"><button type="submit">Сохранить Google</button><button type="button" class="secondary" id="google-sync">Синхронизировать сейчас</button></div></form></div>
+      <form id="withdrawal-form" class="card">
+        <h2>Вывод BNB на биржу</h2>
+        <label>Адрес биржи в сети BSC<input id="withdraw-destination" spellcheck="false" required pattern="0x[0-9a-fA-F]{40}"></label>
+        <p class="muted small">По кнопке «Вывести»: первый аккаунт → второй аккаунт той же сид-фразы → биржа. Сид-фраза берётся из C соответствующей строки Google, адрес — из B. Используются стандартные аккаунты MetaMask 1 и 2. Суммы и комиссии показываются перед подтверждением. Адрес биржи фиксируется для каждого подтверждённого вывода; изменение настройки действует на новые выводы.</p>
+        <p class="muted small">Переводится только BNB, включая уже имеющийся BNB второго аккаунта. USDT остаётся на месте; для его будущего перевода снова понадобится BNB на комиссию. Проверьте минимальный депозит BNB и сеть BSC на бирже.</p>
+        <button type="submit">Сохранить адрес биржи</button>
+      </form>
       <form id="settings-form"><div class="settings-grid"><div class="card"><p class="eyebrow">ПОДКЛЮЧЕНИЕ К СЕТИ</p><h2>Проверки балансов</h2><label>Интервал, секунды<input id="interval" type="number" min="10" max="3600" required></label><label>RPC URL — по одному на строку<textarea id="rpc-urls" rows="4" required spellcheck="false"></textarea></label><p class="muted small">HTTPS, BSC mainnet (56), поддержка finalized. При ошибке используются следующие адреса. Публичные RPC имеют лимиты; большой список требует собственной квоты. Интервал отсчитывается после окончания цикла.</p><label class="check-label"><input id="usdt-enabled" type="checkbox"> Проверять USDT (BSC)</label><p class="muted small">Контракт: 0x55d398326f99059ff775485246999027b3197955. Первый баланс — без уведомления.</p><label>Минимальный прирост для уведомлений, USDT<input id="usdt-threshold" type="text" inputmode="decimal" required></label><label>Минимальный прирост для уведомлений, BNB<input id="threshold" type="text" inputmode="decimal" required></label><p class="muted small">0 — уведомлять о любом положительном изменении. Мелкие изменения не суммируются для достижения порога. Отслеживаются BNB и указанный ниже USDT; остальные токены не проверяются.</p></div>
       <div class="card"><p class="eyebrow">УВЕДОМЛЕНИЯ</p><h2>Telegram</h2><label class="check-label"><input id="telegram-enabled" type="checkbox"> Включить уведомления о приросте</label><label>Токен бота<input id="telegram-token" type="password" autocomplete="new-password" placeholder="123456:…"></label><p id="token-hint" class="muted small"></p><label class="check-label"><input id="clear-token" type="checkbox"> Удалить сохранённый токен</label><label>Ваш Chat ID<input id="telegram-chat" placeholder="123456789" inputmode="text"></label><p class="muted small">Создайте бота через @BotFather, откройте чат с вашим ботом и нажмите Start. Введите числовой Chat ID. Сначала сохраните настройки, затем отправьте тест.</p><button id="telegram-test" type="button" class="secondary">Отправить тестовое сообщение</button><p class="muted small">Выключение Telegram отменяет ожидающие сообщения. Токен хранится в базе на вашей VM; берегите резервные копии.</p></div></div><div class="save-bar"><span class="muted small">Изменения применятся при следующем цикле.</span><button type="submit">Сохранить настройки</button></div></form>
       <div class="card google-card"><p class="eyebrow">УВЕДОМЛЕНИЯ</p><h2>Электронная почта</h2>
@@ -61,11 +69,12 @@
       <div class="save-bar"><button type="submit">Сохранить email</button><button id="email-test" type="button" class="secondary">Отправить тестовое письмо</button></div>
       </form></div>
     </section>
-    <footer>BNB Monitor 1.1 · Только чтение · Панель для локальной сети / VPN</footer>
+    <footer>BNB Monitor · Мониторинг и вывод BNB · Панель для локальной сети / VPN</footer>
   </div>
   <div id="toast" role="status" hidden></div>
 </main>
 </body></html>
+
 
 
 

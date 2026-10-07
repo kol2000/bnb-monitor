@@ -20,6 +20,7 @@ const $ = id => document.getElementById(id);
 let csrf = '', loadedSettings = false, loadedGoogle = false, loggedIn = false, refreshing = false;
 let toastTimer;
 let checkingWallet = null;
+let withdrawalBusy = false, loadedWithdrawal = false;
 function toast(text, error=false) { $('toast').textContent=text; $('toast').className=error?'error':''; $('toast').hidden=false; clearTimeout(toastTimer); toastTimer=setTimeout(()=>$('toast').hidden=true,7000); }
 async function api(path, method='GET', body) {
   const r=await fetch('/api/'+path,{method,headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},body:body===undefined?undefined:JSON.stringify(body)});
@@ -72,7 +73,7 @@ function renderWallets() {
  $('wallet-empty').hidden=walletRows.length>0;
  $('wallet-filter-empty').hidden=walletRows.length===0 || wallets.length>0;
  $('wallet-visible-count').textContent=hideSmallBalances?'Показано: '+wallets.length+' из '+walletRows.length:'';
- $('wallet-list').innerHTML=wallets.map(w=>`<tr><td><div class="name">${escapeHtml(w.name)} <button class="quiet" data-copy="${escapeHtml(w.name)}" data-copy-kind="name" title="Копировать название кошелька" aria-label="Копировать название кошелька">⧉</button></div><small><a class="mono" title="${escapeHtml(w.address)}" href="https://bscscan.com/address/${w.address}" target="_blank" rel="noopener noreferrer">${short(w.address)} ↗</a> <button class="quiet" data-copy="${w.address}" title="Копировать адрес">⧉</button></small></td><td class="mono">${w.bnb===null?'—':escapeHtml(w.bnb)}</td><td class="mono">${escapeHtml(w.usd ?? '—')}</td><td class="mono" title="${escapeHtml(usdtEnabled && w.usdt != null ? w.usdt + ' USDT' : '')}">${usdtEnabled ? (w.usdt == null ? '—' : '$' + formatUsdtTotal(w.usdt).replace(/\s/g,'').replace(',','.')) : 'Выключен'}</td><td class="wallet-checks">${checkLine('BNB', w.checked, w.error)}${checkLine('USDT', w.usdt_checked, w.usdt_error, usdtEnabled)}</td><td><input aria-label="Уведомления ${escapeHtml(w.name)}" type="checkbox" data-notify="${w.id}" ${w.notify?'checked':''}></td><td><div class="wallet-actions"><button class="quiet wallet-refresh" data-check="${w.id}" title="Принудительно обновить баланс сейчас" aria-label="Обновить баланс ${escapeHtml(w.name)}" ${checkingWallet !== null ? 'disabled' : ''}>${checkingWallet === String(w.id) ? 'Обновление…' : '↻ Обновить'}</button><button class="quiet" data-rename="${w.id}" data-name="${escapeHtml(w.name)}" title="Переименовать">✎</button><button class="quiet danger wallet-delete" data-delete="${w.id}" title="Удалить кошелёк">Удалить</button></div></td></tr>`).join('');
+ $('wallet-list').innerHTML=wallets.map(w=>`<tr><td><div class="name">${escapeHtml(w.name)} <button class="quiet" data-copy="${escapeHtml(w.name)}" data-copy-kind="name" title="Копировать название кошелька" aria-label="Копировать название кошелька">⧉</button></div><small><a class="mono" title="${escapeHtml(w.address)}" href="https://bscscan.com/address/${w.address}" target="_blank" rel="noopener noreferrer">${short(w.address)} ↗</a> <button class="quiet" data-copy="${w.address}" title="Копировать адрес">⧉</button></small></td><td class="mono">${w.bnb===null?'—':escapeHtml(w.bnb)}${w.balance != null && BigInt(w.balance)>0n ? `<small><button class="quiet" data-withdraw="${w.id}" ${withdrawalBusy?'disabled':''}>Вывести</button></small>` : ''}</td><td class="mono">${escapeHtml(w.usd ?? '—')}</td><td class="mono" title="${escapeHtml(usdtEnabled && w.usdt != null ? w.usdt + ' USDT' : '')}">${usdtEnabled ? (w.usdt == null ? '—' : '$' + formatUsdtTotal(w.usdt).replace(/\s/g,'').replace(',','.')) : 'Выключен'}</td><td class="wallet-checks">${checkLine('BNB', w.checked, w.error)}${checkLine('USDT', w.usdt_checked, w.usdt_error, usdtEnabled)}</td><td><input aria-label="Уведомления ${escapeHtml(w.name)}" type="checkbox" data-notify="${w.id}" ${w.notify?'checked':''}></td><td><div class="wallet-actions"><button class="quiet wallet-refresh" data-check="${w.id}" title="Принудительно обновить баланс сейчас" aria-label="Обновить баланс ${escapeHtml(w.name)}" ${checkingWallet !== null ? 'disabled' : ''}>${checkingWallet === String(w.id) ? 'Обновление…' : '↻ Обновить'}</button><button class="quiet" data-rename="${w.id}" data-name="${escapeHtml(w.name)}" title="Переименовать">✎</button><button class="quiet danger wallet-delete" data-delete="${w.id}" title="Удалить кошелёк">Удалить</button></div></td></tr>`).join('');
 }
 $('wallet-sort').value = walletSort;
 $('hide-small-balances').checked = hideSmallBalances;
@@ -135,6 +136,7 @@ async function refresh(){
  const delivery={pending:'В очереди',sent:'Отправлено',off:'Не требуется',cancelled:'Отменено',suppressed:'Не требуется — доставлено в Telegram'};
  $('event-empty').hidden=d.events.length>0;
  $('event-list').innerHTML=d.events.map(e=>`<tr><td>${escapeHtml(date(e.created))}<small>${escapeHtml(e.name)} · ${short(e.address)}</small></td><td class="mono ${e.delta.startsWith('-')?'negative':'positive'}">${e.delta.startsWith('-')?'':'+'}${escapeHtml(e.delta_bnb)} ${escapeHtml(e.asset)}</td><td class="mono">${escapeHtml(e.new_bnb)} ${escapeHtml(e.asset)}</td><td><a href="https://bscscan.com/block/${e.block}" target="_blank" rel="noopener noreferrer">${e.block} ↗</a></td><td>Telegram: ${delivery[e.delivery]||escapeHtml(e.delivery)}${e.delivery_error?`<small class="negative">${escapeHtml(e.delivery_error)} · попыток: ${e.attempts}</small>`:''}<small>Email: ${e.email_delivery==='pending' && e.delivery==='pending' && e.attempts<3 ? 'Резерв — ожидает Telegram' : (delivery[e.email_delivery]||'Не требуется')}</small>${e.email_error?`<small class="negative">${escapeHtml(e.email_error)} · попыток: ${e.email_attempts}</small>`:''}</td></tr>`).join('');
+ if(!loadedWithdrawal){$('withdraw-destination').value=d.settings.withdraw_destination;loadedWithdrawal=true;}
  if(!loadedSettings){const c=d.settings;$('interval').value=c.interval;$('threshold').value=c.threshold;$('usdt-threshold').value=c.usdt_threshold;$('usdt-enabled').checked=c.usdt_enabled;$('rpc-urls').value=c.rpc_urls.join('\n');$('telegram-enabled').checked=c.telegram_enabled;$('telegram-chat').value=c.telegram_chat;$('token-hint').textContent=c.telegram_token_set?'Токен сохранён. Пустое поле оставит его без изменений.':'Токен ещё не задан.';loadedSettings=true;}
  }catch(e){toast(e.message,true);}finally{refreshing=false;}
 }
@@ -170,3 +172,35 @@ $('email-test').onclick=async()=>{
 };
 
 
+
+
+$('withdrawal-form').onsubmit=async e=>{
+ e.preventDefault();
+ try {await api('settings','POST',{withdraw_destination:$('withdraw-destination').value.trim()});loadedWithdrawal=false;toast('Адрес биржи сохранён');await refresh();}
+ catch(err){toast(err.message,true);}
+};
+$('wallet-list').addEventListener('click',async e=>{
+ const b=e.target.closest('[data-withdraw]');if(!b || withdrawalBusy)return;
+ withdrawalBusy=true;renderWallets();
+ try{
+  toast('Рассчитываем маршрут и комиссии…');
+  const p=await api('wallets/'+b.dataset.withdraw+'/withdraw/preview','POST',{});
+  const accepted=confirm(`Вывести BNB в сети BSC?\n\nПервый аккаунт:\n${p.source}\nБаланс: ${p.balance1} BNB\n\nВторой аккаунт этой сид-фразы:\n${p.middle}\nУже есть: ${p.balance2} BNB\nПолучит: ${p.value1} BNB\n\nБиржа:\n${p.destination}\nПолучит всего: ${p.value2} BNB\n\nКомиссия каждого перевода: ${p.fee} BNB.\nВыводится также имеющийся BNB второго аккаунта. USDT не переводится.\n\nПроверьте адрес биржи, сеть BSC и минимальную сумму депозита. Подтвердить оба перевода?`);
+  if(accepted){await api('withdrawals/'+p.id+'/confirm','POST',{});toast('Вывод запущен. Статус и хеши — в журнале над списком кошельков.');}
+ }catch(err){toast(err.message,true);}finally{withdrawalBusy=false;renderWallets();await refreshWithdrawals();}
+});
+async function refreshWithdrawals(){
+ if(!loggedIn)return;
+ try{
+  const d=await api('withdrawals');
+  const labels={pending1:'Первый аккаунт → второй: ожидаем подтверждение',pending2:'Второй аккаунт → биржа: ожидаем подтверждение',done:'Оба перевода подтверждены',failed:'Перевод отклонён',blocked:'Вывод приостановлен',cancelled:'Вывод отменён до отправки'};
+  $('withdrawal-history').hidden=!d.items.length;
+  $('withdrawal-items').innerHTML=d.items.map(p=>`<p><strong>${escapeHtml(labels[p.state]||p.state)}</strong> · ${escapeHtml(date(p.created))}<br><span class="mono">${escapeHtml(short(p.source))} → ${escapeHtml(short(p.middle))} → ${escapeHtml(short(p.destination))}</span><br>На биржу: ${escapeHtml(p.value2)} BNB${p.hash1?` · <a href="https://bscscan.com/tx/${escapeHtml(p.hash1)}" target="_blank" rel="noopener noreferrer">Перевод 1 ↗</a>`:''}${p.hash2?` · <a href="https://bscscan.com/tx/${escapeHtml(p.hash2)}" target="_blank" rel="noopener noreferrer">Перевод 2 ↗</a>`:''}${p.error?`<small class="negative">${escapeHtml(p.error)}</small>`:''}${p.can_cancel?`<button class="quiet" data-withdraw-cancel="${p.id}">Отменить расчёт</button>`:''}</p>`).join('');
+ }catch(err){toast(err.message,true);}
+}
+setInterval(refreshWithdrawals,5000);
+
+$('withdrawal-items').addEventListener('click',async e=>{
+ const b=e.target.closest('[data-withdraw-cancel]');if(!b)return;
+ try{await api('withdrawals/'+b.dataset.withdrawCancel+'/cancel','POST',{});toast('Расчёт отменён. Можно запустить новый вывод.');await refreshWithdrawals();}catch(err){toast(err.message,true);}
+});

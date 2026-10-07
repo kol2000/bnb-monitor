@@ -19,6 +19,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from prices import usd, SOURCE
 from email_notifications import DEFAULTS as EMAIL_DEFAULTS, validate_settings, send_email, EmailError
 from email.utils import make_msgid
+import withdrawals
 
 DATA = Path(os.environ.get('DATA_DIR', '/data'))
 DATA.mkdir(parents=True, exist_ok=True)
@@ -34,6 +35,7 @@ ASSET_FIELDS = {'BNB': ('balance', 'block', 'checked', 'error'),
                 'USDT': ('usdt_balance', 'usdt_block', 'usdt_checked', 'usdt_error')}
 
 DEFAULTS.update(EMAIL_DEFAULTS)
+DEFAULTS.update(withdrawals.DEFAULTS)
 
 @contextmanager
 def db():
@@ -72,6 +74,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS status (key TEXT PRIMARY KEY, value TEXT NOT NULL);
         CREATE INDEX IF NOT EXISTS event_delivery ON events(delivery, retry_at);
         ''')
+        withdrawals.schema(c)
         c.execute('BEGIN IMMEDIATE')
         columns = {r['name'] for r in c.execute('PRAGMA table_info(wallets)')}
         for name, kind in [('usdt_balance', 'TEXT'), ('usdt_block', 'INTEGER'),
@@ -464,11 +467,13 @@ def save_settings():
         raise ValueError('Интервал Google: от 60 до 86400 секунд.')
     if sheets_enabled and (not sheets_id or not (DATA / 'google-service-account.json').is_file()):
         raise ValueError('Укажите таблицу и сначала установите ключ через configure_google.py на VM.')
+    withdraw_destination = withdrawals.destination(data.get('withdraw_destination', cfg['withdraw_destination']))
     email_cfg = validate_settings(data, cfg)
     cfg.update(usdt_enabled=usdt_enabled, usdt_threshold=usdt_threshold, interval=interval, threshold=threshold, rpc_urls=urls, telegram_enabled=enabled,
                telegram_token=token, telegram_chat=chat, sheets_enabled=sheets_enabled,
                sheets_id=sheets_id, sheets_tab=sheets_tab, sheets_interval=sheets_interval)
     cfg.update(email_cfg)
+    cfg['withdraw_destination'] = withdraw_destination
     with db() as c:
         for k, v in cfg.items():
             c.execute('UPDATE settings SET value=? WHERE key=?', (json.dumps(v), k))
@@ -505,3 +510,6 @@ def request_check():
     return {'ok': True}
 
 
+
+
+withdrawals.install(app)
