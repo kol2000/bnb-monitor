@@ -142,7 +142,7 @@ async function refresh(){
 }
 $('login-form').addEventListener('submit',async e=>{e.preventDefault();const b=e.submitter;b.disabled=true;try{const d=await api('login','POST',{password:$('password').value});csrf=d.csrf;$('password').value='';loggedIn=true;loadedSettings=false;showAuth();await refresh();}catch(e){toast(e.message,true);}finally{b.disabled=false;}});
 $('logout').onclick=async()=>{try{await api('logout','POST',{});location.reload();}catch(e){toast(e.message,true);}};
-document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-tab]').forEach(x=>{x.classList.toggle('active',x===b);$('tab-'+x.dataset.tab).hidden=x!==b;});});
+document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-tab]').forEach(x=>{x.classList.toggle('active',x===b);$('tab-'+x.dataset.tab).hidden=x!==b;});if(b.dataset.tab==='withdrawals')refreshWithdrawals();});
 $('wallet-form').onsubmit=async e=>{e.preventDefault();const wallets=$('addresses').value.split('\n').map(s=>s.trim()).filter(Boolean).map(s=>{const [address,...parts]=s.split(/\s+/);return {address,name:parts.join(' ')};});try{const d=await api('wallets','POST',{wallets});$('addresses').value='';toast('Добавлено: '+d.added+'. Повторы пропущены.');await api('check','POST',{});await refresh();}catch(e){toast(e.message,true);}};
 $('wallet-list').addEventListener('click',async e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.check){if(checkingWallet !== null)return;checkingWallet=b.dataset.check;renderWallets();try{await api('wallets/'+checkingWallet+'/check','POST',{});toast('Баланс кошелька обновлён');}catch(e){toast(e.message,true);}finally{checkingWallet=null;renderWallets();await refresh();}return;}try{if(b.hasAttribute('data-copy')){const isName=b.dataset.copyKind==='name';try{await navigator.clipboard.writeText(b.dataset.copy);toast(isName?'Название кошелька скопировано':'Адрес скопирован');}catch{prompt(isName?'Скопируйте название кошелька:':'Скопируйте адрес:',b.dataset.copy);}return;}if(b.dataset.delete){if(!confirm('Удалить кошелёк из мониторинга? История сохранится, ожидающие уведомления отменятся.'))return;await api('wallets/'+b.dataset.delete,'DELETE',{});}if(b.dataset.rename){const name=prompt('Название кошелька:',b.dataset.name);if(name===null)return;await api('wallets/'+b.dataset.rename,'POST',{name});}await refresh();}catch(e){toast(e.message,true);}});
 $('wallet-list').addEventListener('change',async e=>{const input=e.target;if(!input.dataset.notify)return;try{await api('wallets/'+input.dataset.notify,'POST',{notify:input.checked});}catch(e){input.checked=!input.checked;toast(e.message,true);}});
@@ -186,7 +186,7 @@ $('wallet-list').addEventListener('click',async e=>{
   toast('Рассчитываем маршрут и комиссии…');
   const p=await api('wallets/'+b.dataset.withdraw+'/withdraw/preview','POST',{});
   const accepted=confirm(`Вывести BNB в сети BSC?\n\nПервый аккаунт:\n${p.source}\nБаланс: ${p.balance1} BNB\n\nВторой аккаунт этой сид-фразы:\n${p.middle}\nУже есть: ${p.balance2} BNB\nПолучит: ${p.value1} BNB\n\nБиржа:\n${p.destination}\nПолучит всего: ${p.value2} BNB\n\nКомиссия каждого перевода: ${p.fee} BNB.\nВыводится также имеющийся BNB второго аккаунта. USDT не переводится.\n\nПроверьте адрес биржи, сеть BSC и минимальную сумму депозита. Подтвердить оба перевода?`);
-  if(accepted){await api('withdrawals/'+p.id+'/confirm','POST',{});toast('Вывод запущен. Статус и хеши — в журнале над списком кошельков.');}
+  if(accepted){await api('withdrawals/'+p.id+'/confirm','POST',{});toast('Вывод запущен. Статус и хеши — на вкладке «Выводы».');}
  }catch(err){toast(err.message,true);}finally{withdrawalBusy=false;renderWallets();await refreshWithdrawals();}
 });
 async function refreshWithdrawals(){
@@ -194,7 +194,7 @@ async function refreshWithdrawals(){
  try{
   const d=await api('withdrawals');
   const labels={pending1:'Первый аккаунт → второй: ожидаем подтверждение',pending2:'Второй аккаунт → биржа: ожидаем подтверждение',done:'Оба перевода подтверждены',failed:'Перевод отклонён',blocked:'Вывод приостановлен',cancelled:'Вывод отменён до отправки'};
-  $('withdrawal-history').hidden=!d.items.length;
+  $('withdrawal-empty').hidden=d.items.length>0;
   $('withdrawal-items').innerHTML=d.items.map(p=>`<p><strong>${escapeHtml(labels[p.state]||p.state)}</strong> · ${escapeHtml(date(p.created))}<br><span class="mono">${escapeHtml(short(p.source))} → ${escapeHtml(short(p.middle))} → ${escapeHtml(short(p.destination))}</span><br>На биржу: ${escapeHtml(p.value2)} BNB${p.hash1?` · <a href="https://bscscan.com/tx/${escapeHtml(p.hash1)}" target="_blank" rel="noopener noreferrer">Перевод 1 ↗</a>`:''}${p.hash2?` · <a href="https://bscscan.com/tx/${escapeHtml(p.hash2)}" target="_blank" rel="noopener noreferrer">Перевод 2 ↗</a>`:''}${p.error?`<small class="negative">${escapeHtml(p.error)}</small>`:''}${p.can_cancel?`<button class="quiet" data-withdraw-cancel="${p.id}">Отменить расчёт</button>`:''}</p>`).join('');
  }catch(err){toast(err.message,true);}
 }

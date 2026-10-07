@@ -15,9 +15,8 @@
     <p class="small"><a href="https://coinmarketcap.com/currencies/bnb/" target="_blank" rel="noopener noreferrer">Курс BNB · CoinMarketCap ↗</a> · <span id="price-status">Ожидаем курс</span></p>
     <div id="rpc-error" class="warning" hidden></div>
     <p class="notice">ⓘ Отслеживаем <strong>изменение баланса</strong>, не каждую транзакцию. Поступление и списание между проверками могут взаимно скрыться. Первый баланс — точка отсчёта, без уведомления.</p>
-    <nav class="tabs"><button class="tab active" data-tab="wallets">Кошельки</button><button class="tab" data-tab="history">История изменений</button><button class="tab" data-tab="settings">Настройки</button></nav>
+    <nav class="tabs"><button class="tab active" data-tab="wallets">Кошельки</button><button class="tab" data-tab="history">История изменений</button><button class="tab" data-tab="withdrawals">Выводы</button><button class="tab" data-tab="settings">Настройки</button></nav>
     <section id="tab-wallets">
-      <div id="withdrawal-history" class="card" hidden><h2>Вывод BNB</h2><div id="withdrawal-items"></div></div>
       <div class="card add-card"><div><h2>Добавить кошельки</h2><p class="muted small">Один адрес на строку. Можно добавить название через пробел.</p></div><form id="wallet-form"><textarea id="addresses" rows="3" placeholder="0x… Основной кошелёк&#10;0x… Резервный" required spellcheck="false"></textarea><button type="submit">+ Добавить адреса</button></form></div>
       <label class="wallet-sort-label" for="wallet-sort">Сортировка кошельков
         <select id="wallet-sort">
@@ -32,6 +31,7 @@
       <div class="table-wrap card"><table><thead><tr><th>Кошелёк / адрес</th><th>Баланс BNB</th><th>≈ USD (BNB)</th><th>Баланс USDT</th><th>Проверка</th><th>Уведомления</th><th></th></tr></thead><tbody id="wallet-list"></tbody></table><div id="wallet-empty" class="empty"><div class="empty-icon">◇</div><h2>Начните с первого кошелька</h2><p>Добавьте публичный BSC-адрес выше.<br>Баланс появится после ближайшей проверки.</p></div><div id="wallet-filter-empty" class="empty" hidden>Нет кошельков с BNB от $0.01 или USDT от 0.01. Отключите фильтр, чтобы увидеть все адреса.</div></div>
     </section>
     <section id="tab-history" hidden><div class="section-heading"><h2>Последние 200 изменений</h2><p class="muted small">Время отображается в часовом поясе вашего браузера.</p></div><div class="table-wrap card"><table><thead><tr><th>Время / кошелёк</th><th>Изменение / актив</th><th>Новый баланс</th><th>Блок</th><th>Уведомление</th></tr></thead><tbody id="event-list"></tbody></table><div id="event-empty" class="empty">Изменений пока нет. Начальный баланс в историю не записывается.</div></div></section>
+    <section id="tab-withdrawals" hidden><div id="withdrawal-history" class="card"><h2>Журнал вывода BNB</h2><p class="muted small">Последние 30 операций: маршрут, сумма, статус и ссылки на транзакции.</p><div id="withdrawal-items"></div><div id="withdrawal-empty" class="empty">Выводов пока нет.</div></div></section>
     <section id="tab-settings" hidden>
       <div class="card google-card"><p class="eyebrow">ИСТОЧНИК КОШЕЛЬКОВ</p><h2>Google Таблицы</h2>
       <form id="google-form"><label class="check-label"><input id="sheets-enabled" type="checkbox"> Автоматически получать кошельки из таблицы</label>
