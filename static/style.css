@@ -33,3 +33,7 @@
 
 /* Selectable for HTTP clipboard fallback, without moving the page. */
 .clipboard-copy-buffer{position:fixed;top:0;left:0;width:1px;height:1px;padding:0;border:0;opacity:0;pointer-events:none;font-size:16px}
+
+/* Wallet actions: green withdrawal and rename beside the wallet name. */
+.wallet-withdraw{color:var(--green)}
+.wallet-actions{grid-template-columns:max-content}
