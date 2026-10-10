@@ -51,7 +51,7 @@ class Client:
 
     def call(self, path, params=None, method='GET', signed=True):
         params = dict(params or {})
-        headers = {}
+        headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
         if signed:
             params.update(timestamp=int(time.time()*1000), recvWindow=10000)
             headers['X-MEXC-APIKEY'] = self.key
@@ -76,7 +76,15 @@ class Client:
         except MexcError:
             raise
         except HTTPError as e:
-            raise MexcError('MEXC HTTP %s. Проверьте права ключа, IP и лимиты.' % e.code) from None
+            try:
+                error_body = json.loads(e.read(65536))
+                code = error_body.get('code') if isinstance(error_body, dict) else None
+            except Exception:
+                code = None
+            detail = ' · код MEXC %s' % code if isinstance(code, int) else ''
+            if code == 700013:
+                detail += ' · неверный Content-Type'
+            raise MexcError('MEXC HTTP %s%s. Запрос автоматически не повторяется.' % (e.code, detail)) from None
         except Exception:
             raise MexcError('Нет достоверного ответа MEXC. Операция автоматически не повторяется.') from None
 
