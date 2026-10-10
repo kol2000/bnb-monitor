@@ -14,6 +14,7 @@ from urllib.error import HTTPError
 
 BASE = 'https://api.mexc.com'
 ACTIVE = ('buying', 'bought', 'withdrawing')
+MAX_RESPONSE_BYTES = 32 * 1024 * 1024
 
 class MexcError(ValueError):
     pass
@@ -61,7 +62,13 @@ class Client:
                       data=b'' if method == 'POST' else None)
         try:
             with build_opener(NoRedirect()).open(req, timeout=15) as res:
-                data = json.loads(res.read(4000000))
+                raw = res.read(MAX_RESPONSE_BYTES + 1)
+                if len(raw) > MAX_RESPONSE_BYTES:
+                    raise MexcError('Ответ MEXC превышает лимит 32 МиБ. Данные не обработаны.')
+                try:
+                    data = json.loads(raw)
+                except (ValueError, UnicodeError):
+                    raise MexcError('MEXC вернул неполный или некорректный JSON (%d байт).' % len(raw)) from None
             if isinstance(data, dict) and data.get('code') not in (None, 0, 200):
                 code = data.get('code')
                 raise MexcError('MEXC отклонил запрос (код %s).' % (code if isinstance(code, int) else 'API'))
