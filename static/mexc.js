@@ -15,7 +15,15 @@ async function refreshMexcJobs(){
  $('mexc-jobs').innerHTML=result.items.map(j=>{const d=j.data;return `<article class="mexc-job"><strong>${escapeHtml(mexcStates[j.state]||j.state)}</strong> · ${date(j.created)}<p>Покупка: ${escapeHtml(d.total)} USDT · BNB: ${escapeHtml(d.bought||'ожидается')}<br>Сеть: ${escapeHtml(d.network)} · Получатель: <span class="mexc-address">${escapeHtml(d.address)}</span></p>${d.order_id?`<small>Ордер: ${escapeHtml(d.order_id)}</small>`:''}${d.withdraw_id?`<small>Вывод: ${escapeHtml(d.withdraw_id)} · ${escapeHtml(mexcWithdrawStates[d.withdraw_status]||'Принят')}</small>`:''}${d.txid?`<p class="mexc-address">Tx: ${escapeHtml(d.txid)}</p>`:''}${j.error?`<p class="negative">${escapeHtml(j.error)}</p>`:''}${['buying','withdrawing'].includes(j.state)?`<button type="button" class="secondary" data-mexc-check="${j.id}">Проверить статус</button>`:''}${j.state==='bought'?`<button type="button" data-mexc-withdraw="${j.id}">Рассчитать вывод BNB</button> <button type="button" class="quiet" data-mexc-keep="${j.id}">Оставить BNB на бирже</button>`:''}</article>`;}).join('')||'<p class="muted">Операций из приложения пока нет.</p>';
  }catch(e){toast(e.message,true);}
 }
-$('mexc-refresh').onclick=()=>mexcAction(async()=>{
+async function openMexcTab(){
+ if(!loggedIn)return;
+ await refreshMexcData();
+}
+function refreshMexcData(){return mexcAction(async()=>{
+ $('mexc-updated').classList.remove('negative');
+ $('mexc-updated').textContent='Загружаем баланс, сети и историю MEXC…';
+ if(!$('mexc-history').innerHTML.trim())$('mexc-history').innerHTML='<tr><td colspan="4">Загрузка истории выводов…</td></tr>';
+ try{
  const d=await api('mexc/refresh','POST',{});
  $('mexc-balances').textContent=['USDT','BNB'].map(asset=>{const b=d.balances.find(x=>x.asset===asset)||{free:'0',locked:'0'};return `${asset}: доступно ${b.free} · заблокировано ${b.locked}`;}).join('\n');
  $('mexc-updated').textContent='Обновлено: '+date(d.updated);
@@ -23,7 +31,14 @@ $('mexc-refresh').onclick=()=>mexcAction(async()=>{
  $('mexc-network').innerHTML='<option value="">Выберите сеть получателя</option>'+d.networks.filter(n=>n.withdrawEnable).map(n=>`<option value="${escapeHtml(n.netWork)}">${escapeHtml(n.netWork)} · комиссия ${escapeHtml(n.withdrawFee)} BNB · минимум ${escapeHtml(n.withdrawMin)}</option>`).join('');
  if([...$('mexc-network').options].some(o=>o.value===old))$('mexc-network').value=old;
  $('mexc-history').innerHTML=d.withdrawals.map(r=>`<tr><td>${date(Number(r.applyTime)/1000)}</td><td>${escapeHtml(r.amount)} BNB<br><small>Комиссия: ${escapeHtml(r.transactionFee||'—')}</small></td><td class="mexc-address">${escapeHtml(r.address)}<br><small>${escapeHtml(r.network||'—')}</small></td><td>${escapeHtml(mexcWithdrawStates[r.status]||r.status)}<small class="mexc-address">${escapeHtml(r.txId||'')}</small></td></tr>`).join('')||'<tr><td colspan="4">Выводов BNB за 7 дней нет.</td></tr>';
-});
+ }catch(e){
+ $('mexc-updated').classList.add('negative');
+ $('mexc-updated').textContent='Не удалось обновить данные MEXC: '+e.message+' Нажмите «Проверить баланс и выводы», чтобы повторить.';
+ if($('mexc-history').textContent==='Загрузка истории выводов…')$('mexc-history').innerHTML='<tr><td colspan="4">История не загружена. Повторите проверку данных MEXC.</td></tr>';
+ throw e;
+ }
+});}
+$('mexc-refresh').onclick=refreshMexcData;
 $('mexc-buy-form').onsubmit=e=>{e.preventDefault();mexcAction(async()=>{
  const j=await api('mexc/preview','POST',{amount:$('mexc-amount').value,address:$('mexc-address').value,network:$('mexc-network').value,memo:$('mexc-memo').value});
  const d=j.data;
