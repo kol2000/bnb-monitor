@@ -20,6 +20,7 @@ from prices import usd, SOURCE
 from email_notifications import DEFAULTS as EMAIL_DEFAULTS, validate_settings, send_email, EmailError
 from email.utils import make_msgid
 import withdrawals
+import mexc
 
 DATA = Path(os.environ.get('DATA_DIR', '/data'))
 DATA.mkdir(parents=True, exist_ok=True)
@@ -75,6 +76,7 @@ def init_db():
         CREATE INDEX IF NOT EXISTS event_delivery ON events(delivery, retry_at);
         ''')
         withdrawals.schema(c)
+        mexc.schema(c)
         c.execute('BEGIN IMMEDIATE')
         columns = {r['name'] for r in c.execute('PRAGMA table_info(wallets)')}
         for name, kind in [('usdt_balance', 'TEXT'), ('usdt_block', 'INTEGER'),
@@ -513,3 +515,4 @@ def request_check():
 
 
 withdrawals.install(app)
+mexc.install(app)
