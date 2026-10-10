@@ -12,7 +12,7 @@ async function refreshMexcJobs(){
  if(!loggedIn)return;
  try{
  const result=await api('mexc/jobs');
- $('mexc-jobs').innerHTML=result.items.map(j=>{const d=j.data;return `<article class="mexc-job"><strong>${escapeHtml(mexcStates[j.state]||j.state)}</strong> · ${date(j.created)}<p>Покупка: ${escapeHtml(d.total)} USDT · BNB: ${escapeHtml(d.bought||'ожидается')}<br>Сеть: ${escapeHtml(d.network)} · Получатель: <span class="mexc-address">${escapeHtml(d.address)}</span></p>${d.order_id?`<small>Ордер: ${escapeHtml(d.order_id)}</small>`:''}${d.withdraw_id?`<small>Вывод: ${escapeHtml(d.withdraw_id)} · ${escapeHtml(mexcWithdrawStates[d.withdraw_status]||'Принят')}</small>`:''}${d.txid?`<p class="mexc-address">Tx: ${escapeHtml(d.txid)}</p>`:''}${j.error?`<p class="negative">${escapeHtml(j.error)}</p>`:''}${['buying','withdrawing'].includes(j.state)?`<button type="button" class="secondary" data-mexc-check="${j.id}">Проверить статус</button>`:''}${j.state==='bought'?`<button type="button" data-mexc-withdraw="${j.id}">Рассчитать вывод BNB</button> <button type="button" class="quiet" data-mexc-keep="${j.id}">Оставить BNB на бирже</button>`:''}</article>`;}).join('')||'<p class="muted">Операций из приложения пока нет.</p>';
+ $('mexc-jobs').innerHTML=result.items.map(j=>{const d=j.data;if(d.action==='sell')return `<article class="mexc-job"><strong>${escapeHtml(j.state==='done'?'Продажа завершена':j.state==='closed'?'Продажа закрыта':'Проверка продажи')}</strong> · ${date(j.created)}<p>Продажа BNB: ${escapeHtml(d.sold||d.quantity)}<br>Получено USDT: ${escapeHtml(d.received_usdt||'ожидается')}</p>${d.order_id?`<small>Ордер: ${escapeHtml(d.order_id)}</small>`:''}${j.error?`<p class="negative">${escapeHtml(j.error)}</p>`:''}${j.state==='buying'?`<button type="button" class="secondary" data-mexc-check="${j.id}">Проверить статус</button>`:''}</article>`;return `<article class="mexc-job"><strong>${escapeHtml(mexcStates[j.state]||j.state)}</strong> · ${date(j.created)}<p>Покупка: ${escapeHtml(d.total)} USDT · BNB: ${escapeHtml(d.bought||'ожидается')}<br>Сеть: ${escapeHtml(d.network)} · Получатель: <span class="mexc-address">${escapeHtml(d.address)}</span></p>${d.order_id?`<small>Ордер: ${escapeHtml(d.order_id)}</small>`:''}${d.withdraw_id?`<small>Вывод: ${escapeHtml(d.withdraw_id)} · ${escapeHtml(mexcWithdrawStates[d.withdraw_status]||'Принят')}</small>`:''}${d.txid?`<p class="mexc-address">Tx: ${escapeHtml(d.txid)}</p>`:''}${j.error?`<p class="negative">${escapeHtml(j.error)}</p>`:''}${['buying','withdrawing'].includes(j.state)?`<button type="button" class="secondary" data-mexc-check="${j.id}">Проверить статус</button>`:''}${j.state==='bought'?`<button type="button" data-mexc-withdraw="${j.id}">Рассчитать вывод BNB</button> <button type="button" class="quiet" data-mexc-keep="${j.id}">Оставить BNB на бирже</button>`:''}</article>`;}).join('')||'<p class="muted">Операций из приложения пока нет.</p>';
  }catch(e){toast(e.message,true);}
 }
 async function openMexcTab(){
@@ -25,11 +25,12 @@ function refreshMexcData(){return mexcAction(async()=>{
  if(!$('mexc-history').innerHTML.trim())$('mexc-history').innerHTML='<tr><td colspan="4">Загрузка истории выводов…</td></tr>';
  try{
  const d=await api('mexc/refresh','POST',{});
- $('mexc-balances').textContent=['USDT','BNB'].map(asset=>{const b=d.balances.find(x=>x.asset===asset)||{free:'0',locked:'0'};return `${asset}: доступно ${b.free} · заблокировано ${b.locked}`;}).join('\n');
+ $('mexc-balances').innerHTML=['USDT','BNB'].map(asset=>{const b=d.balances.find(x=>x.asset===asset)||{free:'0',locked:'0'};return `<div>${asset}: доступно ${escapeHtml(b.free)} · заблокировано ${escapeHtml(b.locked)} ${asset==='BNB'&&Number(b.free)>0?'<button type="button" id="mexc-sell" class="secondary">Продать</button>':''}</div>`;}).join('');
  $('mexc-updated').textContent='Обновлено: '+date(d.updated);
  const old=$('mexc-network').value;
  $('mexc-network').innerHTML='<option value="">Выберите сеть получателя</option>'+d.networks.filter(n=>n.withdrawEnable).map(n=>`<option value="${escapeHtml(n.netWork)}">${escapeHtml(n.netWork)} · комиссия ${escapeHtml(n.withdrawFee)} BNB · минимум ${escapeHtml(n.withdrawMin)}</option>`).join('');
- if([...$('mexc-network').options].some(o=>o.value===old))$('mexc-network').value=old;
+ if(old&&[...$('mexc-network').options].some(o=>o.value===old))$('mexc-network').value=old;
+ else if([...$('mexc-network').options].some(o=>o.value==='BSC'))$('mexc-network').value='BSC';
  $('mexc-history').innerHTML=d.withdrawals.map(r=>`<tr><td>${date(Number(r.applyTime)/1000)}</td><td>${escapeHtml(r.amount)} BNB<br><small>Комиссия: ${escapeHtml(r.transactionFee||'—')}</small></td><td class="mexc-address">${escapeHtml(r.address)}<br><small>${escapeHtml(r.network||'—')}</small></td><td>${escapeHtml(mexcWithdrawStates[r.status]||r.status)}<small class="mexc-address">${escapeHtml(r.txId||'')}</small></td></tr>`).join('')||'<tr><td colspan="4">Выводов BNB за 7 дней нет.</td></tr>';
  }catch(e){
  $('mexc-updated').classList.add('negative');
@@ -55,3 +56,14 @@ $('mexc-jobs').onclick=e=>{
  if(confirm(`Подтвердить вывод BNB с MEXC?\n\nСеть: ${p.network}\nАдрес: ${p.address}\nMemo: ${p.memo||'нет'}\nСумма заявки: ${p.amount} BNB\nКомиссия MEXC: ${p.fee} BNB\n\nКомиссия дополнительно зарезервирована из купленного BNB. Если биржа удерживает её из суммы заявки, получатель получит меньше; на бирже останется резерв.\n\nПроверьте адрес и сеть. Перевод необратим.`)){await api('mexc/'+id+'/withdraw','POST',{});toast('Проверьте статус вывода в журнале.');}}
  });
 };
+
+$('mexc-balances').addEventListener('click',e=>{
+ if(!e.target.closest('#mexc-sell'))return;
+ mexcAction(async()=>{
+  const j=await api('mexc/sell-preview','POST',{});
+  const d=j.data;
+  if(!confirm(`Продать весь доступный BNB на споте MEXC за USDT по рынку?\n\nДоступно: ${d.available} BNB\nК продаже: ${d.quantity} BNB\nОстаток из-за округления: ${d.dust} BNB\nОриентировочно: ${d.estimate} USDT до комиссии.\n\nИтог зависит от рыночной цены. Заблокированный BNB не продаётся.`))return;
+  await api('mexc/'+j.id+'/sell','POST',{});
+  toast('Запрос продажи обработан. Нажмите «Проверить статус» в журнале.');
+ });
+});

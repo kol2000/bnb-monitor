@@ -199,7 +199,7 @@ def buy_preview(body):
 def buy_confirm(ident):
     from app import db
     j = get_job(ident)
-    if j['state'] != 'preview' or time.time()-j['created'] > 180:
+    if j['state'] != 'preview' or j['data'].get('action') == 'sell' or time.time()-j['created'] > 180:
         raise MexcError('Расчёт истёк или уже подтверждён. Обновите список операций.')
     d = j['data']
     client = Client()
@@ -241,7 +241,7 @@ def reconcile(ident):
     try:
         if state == 'buying':
             order = client.call('/api/v3/order', {'symbol':'BNBUSDT','origClientOrderId':ident})
-            if order.get('clientOrderId') != ident or order.get('side') != 'BUY' or order.get('symbol') != 'BNBUSDT':
+            if order.get('clientOrderId') != ident or order.get('side') != ('SELL' if d.get('action') == 'sell' else 'BUY') or order.get('symbol') != 'BNBUSDT':
                 raise MexcError('Ордер не соответствует запросу. Требуется ручная сверка.')
             d['order_id'] = str(order['orderId'])
             d['order_status'] = order['status']
@@ -259,6 +259,14 @@ def reconcile(ident):
                 raise MexcError('Получены не все исполнения ордера. Вывод пока заблокирован.')
             if len({str(t['id']) for t in trades}) != len(trades):
                 raise MexcError('Повторяющиеся исполнения. Нужна сверка.')
+            if d.get('action') == 'sell':
+                quote_fee = sum((dec(t['commission']) for t in trades if t['commissionAsset']=='USDT'), Decimal(0))
+                quote = dec(order['cummulativeQuoteQty'])
+                if quote_fee > quote:
+                    raise MexcError('Неверная комиссия продажи.')
+                d.update(sold=fmt(qty), received_usdt=fmt(quote-quote_fee))
+                save(ident,'done',d)
+                return get_job(ident)
             fee = sum((dec(t['commission']) for t in trades if t['commissionAsset']=='BNB'),Decimal(0))
             if fee >= qty:
                 raise MexcError('Неверная комиссия покупки.')
@@ -351,6 +359,93 @@ def withdraw_confirm(ident):
         save(ident,'withdrawing',d,str(e))
     return get_job(ident)
 
+def sell_plan(client):
+    a = account(client)
+    if a.get('canTrade') is not True:
+        raise MexcError('Торговля на аккаунте недоступна.')
+    available = free(a, 'BNB')
+    if available <= 0:
+        raise MexcError('Нет свободного BNB для продажи.')
+    allowed = client.call('/api/v3/selfSymbols')
+    if 'BNBUSDT' not in allowed.get('data', []):
+        raise MexcError('BNBUSDT недоступен для торговли через API.')
+    info = client.call('/api/v3/exchangeInfo', {'symbol':'BNBUSDT'}, signed=False)
+    symbols = info.get('symbols', [info] if info.get('symbol') == 'BNBUSDT' else [])
+    if len(symbols) != 1:
+        raise MexcError('Не получены правила BNBUSDT.')
+    s = symbols[0]
+    if ('MARKET' not in s.get('orderTypes', []) or s.get('isSpotTradingAllowed') is False
+            or str(s.get('tradeSideType','1')) not in ('1','3')):
+        raise MexcError('Рыночная продажа BNBUSDT недоступна.')
+    precision = s.get('baseAssetPrecision')
+    if isinstance(precision, bool) or not str(precision).isdigit() or not 0 <= int(precision) <= 18:
+        raise MexcError('Не получена точность количества BNB.')
+    step = Decimal(1).scaleb(-int(precision))
+    minimum = dec(s.get('baseSizePrecision') or '0')
+    maximum = Decimal('1e18')
+    minimum_quote = dec(s.get('quoteAmountPrecisionMarket') or s.get('quoteAmountPrecision') or '0')
+    for f in s.get('filters', []):
+        if f.get('filterType') in ('LOT_SIZE','MARKET_LOT_SIZE'):
+            increment = dec(f.get('stepSize') or '0')
+            if increment:
+                step = max(step, increment)
+            minimum = max(minimum, dec(f.get('minQty') or '0'))
+            limit = dec(f.get('maxQty') or '0')
+            if limit:
+                maximum = min(maximum, limit)
+        if f.get('filterType') in ('MIN_NOTIONAL','NOTIONAL'):
+            minimum_quote = max(minimum_quote, dec(f.get('minNotional') or '0'))
+    quantity = (available/step).to_integral_value(rounding=ROUND_DOWN)*step
+    price = dec(client.call('/api/v3/ticker/price', {'symbol':'BNBUSDT'}, signed=False)['price'])
+    estimate = quantity*price
+    max_quote = dec(s.get('maxQuoteAmountMarket') or s.get('maxQuoteAmount') or '0')
+    if quantity <= 0 or quantity < minimum or estimate < minimum_quote:
+        raise MexcError('Баланс BNB меньше минимального рыночного ордера MEXC.')
+    if quantity > maximum or (max_quote and estimate > max_quote):
+        raise MexcError('Весь баланс превышает лимит одного ордера MEXC. Продажа не отправлена.')
+    return dict(action='sell', quantity=fmt(quantity), available=fmt(available),
+                dust=fmt(available-quantity), estimate=fmt(estimate))
+
+def sell_preview():
+    from app import db
+    with db() as c:
+        if c.execute("SELECT 1 FROM mexc_jobs WHERE state IN ('buying','bought','withdrawing')").fetchone():
+            raise MexcError('Сначала завершите текущую операцию или оставьте купленный BNB на бирже.')
+    data = sell_plan(Client())
+    ident = uuid.uuid4().hex
+    with db() as c:
+        c.execute('INSERT INTO mexc_jobs(id,created,state,data) VALUES (?,?,?,?)',
+                  (ident,time.time(),'preview',json.dumps(data)))
+    return get_job(ident)
+
+def sell_confirm(ident):
+    from app import db
+    j = get_job(ident)
+    d = j['data']
+    if j['state'] != 'preview' or d.get('action') != 'sell' or time.time()-j['created'] > 180:
+        raise MexcError('Расчёт продажи истёк или уже подтверждён.')
+    client = Client()
+    current = sell_plan(client)
+    if current['quantity'] != d['quantity'] or current['available'] != d['available']:
+        raise MexcError('Баланс изменился. Рассчитайте продажу заново.')
+    with db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        if c.execute("SELECT 1 FROM mexc_jobs WHERE state IN ('buying','bought','withdrawing')").fetchone():
+            raise MexcError('Сначала завершите текущую операцию MEXC.')
+        if not c.execute("UPDATE mexc_jobs SET state='buying' WHERE id=? AND state='preview'",(ident,)).rowcount:
+            raise MexcError('Продажа уже подтверждена.')
+    try:
+        result = client.call('/api/v3/order', {'symbol':'BNBUSDT','side':'SELL','type':'MARKET',
+                    'quantity':d['quantity'],'newClientOrderId':ident}, method='POST')
+        if not result.get('orderId'):
+            raise MexcError('Нет ID ордера продажи. Нужна сверка с MEXC.')
+        d['order_id'] = str(result['orderId'])
+        save(ident,'buying',d)
+    except MexcError as e:
+        save(ident,'buying',d,str(e))
+    return get_job(ident)
+
+
 def install(app):
     from app import db
     from flask import request
@@ -369,6 +464,14 @@ def install(app):
         return {'updated':time.time(),'balances':[b for b in a['balances'] if b['asset'] in ('BNB','USDT')],
                 'networks':[{k:n.get(k) for k in ('netWork','name','withdrawEnable','withdrawFee','withdrawMin','withdrawTips')} for n in ns],
                 'withdrawals':[{k:r.get(k) for k in ('id','amount','address','network','status','txId','applyTime','transactionFee')} for r in rows]}
+
+    @app.post('/api/mexc/sell-preview')
+    def mexc_sell_preview():
+        return sell_preview()
+
+    @app.post('/api/mexc/<ident>/sell')
+    def mexc_sell(ident):
+        return sell_confirm(ident)
 
     @app.post('/api/mexc/preview')
     def mexc_preview():
