@@ -271,6 +271,22 @@ def reconcile(ident):
         save(ident,state,d,str(e))
     return get_job(ident)
 
+def withdrawal_step(value):
+    # MEXC returns decimal-place counts (e.g. "18"), not 18 whole BNB.
+    # Also accept explicit fractional increments for compatible API responses.
+    if value is None or isinstance(value, bool):
+        raise MexcError('MEXC не сообщил точность вывода.')
+    text = str(value).strip()
+    if re.fullmatch(r'\d+', text):
+        digits = int(text)
+        if digits > 18:
+            raise MexcError('Неподдерживаемая точность вывода MEXC.')
+        return Decimal(1).scaleb(-digits)
+    step = dec(text)
+    if not Decimal('1e-18') <= step < 1:
+        raise MexcError('Неверная точность вывода MEXC.')
+    return step
+
 def withdrawal_plan(client,d):
     n = network(client,d['network'])
     a = account(client)
@@ -279,7 +295,7 @@ def withdrawal_plan(client,d):
     fee = dec(n['withdrawFee'])
     # Reserve fee in addition to amount: never spend pre-existing BNB.
     # Venue may deduct fee from amount; exact receipt is reported by MEXC history.
-    step = dec(n.get('withdrawIntegerMultiple') or '0.00000001')
+    step = withdrawal_step(n.get('withdrawIntegerMultiple'))
     if step <= 0:
         raise MexcError('Неизвестна точность вывода.')
     available = min(dec(d['bought']),free(a,'BNB'))
