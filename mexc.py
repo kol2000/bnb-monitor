@@ -224,6 +224,14 @@ def buy_confirm(ident):
         save(ident,'buying',d,str(e))
     return get_job(ident)
 
+def withdrawal_asset_matches(row, expected_network):
+    # MEXC history can name native BNB on BSC as BNB-BSC.
+    # Accept only the observed alias for the selected chain, not arbitrary suffixes.
+    if row.get('coin') == 'BNB':
+        return True
+    return (expected_network == 'BSC' and row.get('coin') == 'BNB-BSC'
+            and row.get('network') in ('BSC', 'BNB Smart Chain(BEP20)'))
+
 def reconcile(ident):
     j = get_job(ident)
     d, state = j['data'], j['state']
@@ -262,7 +270,7 @@ def reconcile(ident):
             if len(found) != 1:
                 raise MexcError('Вывод ещё не найден в истории. Повторная отправка заблокирована; проверьте MEXC.')
             r = found[0]
-            if str(r.get('address','')).lower() != d['address'].lower() or r.get('coin') != 'BNB':
+            if str(r.get('address','')).lower() != d['address'].lower() or not withdrawal_asset_matches(r, d['network']):
                 raise MexcError('Данные вывода не совпали. Нужна ручная сверка.')
             d.update(withdraw_id=str(r['id']),withdraw_status=r['status'],txid=r.get('txId') or r.get('transHash') or '')
             state = 'done' if int(r['status']) == 7 else 'closed' if int(r['status']) in (8,9) else state
