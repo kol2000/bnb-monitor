@@ -215,7 +215,7 @@ $('wallet-list').addEventListener('click',async e=>{
   toast('Рассчитываем маршрут и комиссии…');
   const p=await api('wallets/'+b.dataset.withdraw+'/withdraw/preview','POST',{});
   const accepted=confirm(`Вывести BNB в сети BSC?\n\nПервый аккаунт:\n${p.source}\nБаланс: ${p.balance1} BNB\n\nВторой аккаунт этой сид-фразы:\n${p.middle}\nУже есть: ${p.balance2} BNB\nПолучит: ${p.value1} BNB\n\nБиржа:\n${p.destination}\nПолучит всего: ${p.value2} BNB\n\nКомиссия каждого перевода: ${p.fee} BNB.\nВыводится также имеющийся BNB второго аккаунта. USDT не переводится.\n\nПроверьте адрес биржи, сеть BSC и минимальную сумму депозита. Подтвердить оба перевода?`);
-  if(accepted){await api('withdrawals/'+p.id+'/confirm','POST',{});toast('Вывод запущен. Статус и хеши — на вкладке «Выводы».');}
+  if(accepted){await api('withdrawals/'+p.id+'/confirm','POST',{});toast('Вывод запущен. Статус и хеши — на вкладке «Переводы».');}
  }catch(err){toast(err.message,true);}finally{withdrawalBusy=false;renderWallets();await refreshWithdrawals();}
 });
 async function refreshWithdrawals(){

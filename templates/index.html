@@ -18,7 +18,7 @@
     <p class="small"><a href="https://coinmarketcap.com/currencies/bnb/" target="_blank" rel="noopener noreferrer">Курс BNB · CoinMarketCap ↗</a> · <span id="price-status">Ожидаем курс</span></p>
     <div id="rpc-error" class="warning" hidden></div>
     <p class="notice">ⓘ Отслеживаем <strong>изменение баланса</strong>, не каждую транзакцию. Поступление и списание между проверками могут взаимно скрыться. Первый баланс — точка отсчёта, без уведомления.</p>
-    <nav class="tabs"><button class="tab active" data-tab="wallets">Кошельки</button><button class="tab" data-tab="mexc">Биржа MEXC</button><button class="tab" data-tab="history">История изменений</button><button class="tab" data-tab="withdrawals">Выводы</button><button class="tab" data-tab="settings">Настройки</button></nav>
+    <nav class="tabs"><button class="tab active" data-tab="wallets">Кошельки</button><button class="tab" data-tab="mexc">Биржа MEXC</button><button class="tab" data-tab="history">История изменений</button><button class="tab" data-tab="withdrawals">Переводы</button><button class="tab" data-tab="settings">Настройки</button></nav>
     <section id="tab-wallets">
       <div class="card add-card"><div><h2>Добавить кошельки</h2><p class="muted small">Один адрес на строку. Можно добавить название через пробел.</p></div><form id="wallet-form"><textarea id="addresses" rows="3" placeholder="0x… Основной кошелёк&#10;0x… Резервный" required spellcheck="false"></textarea><button type="submit">+ Добавить адреса</button></form></div>
       <label class="wallet-sort-label" for="wallet-sort">Сортировка кошельков
@@ -40,7 +40,7 @@
       <div class="card"><h2>Покупка и вывод</h2><p>После покупки нажмите «Проверить статус», затем «Рассчитать вывод BNB». Перед отправкой вы увидите сумму, адрес, сеть и комиссию.</p><p class="muted">Выводится только BNB этой покупки с резервом на комиссию. При неопределённом ответе повторная отправка блокируется до сверки с биржей.</p><h2>Операции приложения</h2><div id="mexc-jobs"></div></div></div>
       <div class="card"><h2>Выводы BNB с MEXC за 7 дней</h2><p class="muted small">Включая выводы, созданные вне приложения. Данные обновляются кнопкой проверки баланса.</p><div class="table-wrap"><table><thead><tr><th>Время</th><th>Сумма</th><th>Получатель / сеть</th><th>Статус / транзакция</th></tr></thead><tbody id="mexc-history"></tbody></table></div></div>
     </section>
-    <section id="tab-withdrawals" hidden><div id="withdrawal-history" class="card"><h2>Журнал вывода BNB</h2><p class="muted small">Последние 30 операций: маршрут, сумма, статус и ссылки на транзакции.</p><div id="withdrawal-items"></div><div id="withdrawal-empty" class="empty">Выводов пока нет.</div></div></section>
+    <section id="tab-withdrawals" hidden><div id="withdrawal-history" class="card"><h2>Журнал переводов BNB</h2><p class="muted small">Последние 30 операций: маршрут, сумма, статус и ссылки на транзакции.</p><div id="withdrawal-items"></div><div id="withdrawal-empty" class="empty">Выводов пока нет.</div></div></section>
     <section id="tab-settings" hidden>
       <div class="card google-card"><p class="eyebrow">ИСТОЧНИК КОШЕЛЬКОВ</p><h2>Google Таблицы</h2>
       <form id="google-form"><label class="check-label"><input id="sheets-enabled" type="checkbox"> Автоматически получать кошельки из таблицы</label>
