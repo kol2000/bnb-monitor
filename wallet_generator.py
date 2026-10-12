@@ -1,4 +1,4 @@
-"""Generate BIP39 wallets locally; append to Google once, then verify."""
+"""Generate BIP39 wallets locally; fill empty identity rows once, then verify."""
 import fcntl
 import json
 import os
@@ -39,7 +39,7 @@ def request_google(cfg, token, suffix, payload=None):
 
 def read_range(cfg,token,cell_range):
     tab=cfg['sheets_tab'].replace("'","''")
-    return request_google(cfg,token,'/values/'+quote(f"'{tab}'!{cell_range}",safe='')+'?valueRenderOption=UNFORMATTED_VALUE').get('values',[])
+    return request_google(cfg,token,'/values/'+quote(f"'{tab}'!{cell_range}",safe='')+'?valueRenderOption=FORMULA').get('values',[])
 
 def public(row):
     d=json.loads(row['data'])
@@ -86,10 +86,46 @@ def create_records(count):
     except Exception:
         raise RemoteError('Не удалось создать кошельки. Запись в Google не выполнялась.') from None
 
-def append_payload(sheet_id,records):
-    return {'requests':[{'appendCells':{'sheetId':sheet_id,'fields':'userEnteredValue','rows':[
-        {'values':[{}, {'userEnteredValue':{'stringValue':r['address']}},
-                       {'userEnteredValue':{'stringValue':r['seed']}}]} for r in records]}}]}
+def empty_identity(row):
+    # Formulas, whitespace and partial identities count as occupied.
+    return all(value == '' or value is None for value in row)
+
+def vacant_rows(cfg, token, count):
+    limit=min(cfg['row_count'],4999)
+    identities=read_range(cfg,token,f'A1:B{limit}')
+    candidates=[i for i in range(2,limit+1)
+                if empty_identity(identities[i-1] if i<=len(identities) else [])]
+    selected=[]
+    tab=cfg['sheets_tab'].replace("'","''")
+    # Read C only in candidate empty rows, never dump existing wallet seeds.
+    for offset in range(0,len(candidates),20):
+        group=candidates[offset:offset+20]
+        suffix='/values:batchGet?'+ '&'.join('ranges='+quote(f"'{tab}'!C{i}",safe='') for i in group)+'&valueRenderOption=FORMULA'
+        values=request_google(cfg,token,suffix).get('valueRanges',[])
+        if len(values)!=len(group):raise ValueError('Не удалось проверить свободные строки.')
+        for row,result in zip(group,values):
+            if all(empty_identity(v) for v in result.get('values',[])):
+                selected.append(row)
+                if len(selected)==count:return selected
+    # Grow the grid only if its existing rows contain no remaining empty slots.
+    extra=count-len(selected)
+    if cfg['row_count']+extra>4999:raise ValueError('Нет свободных строк в пределах 4999 строк листа.')
+    return selected+list(range(cfg['row_count']+1,cfg['row_count']+extra+1))
+
+def append_payload(sheet_id,records,rows,row_count):
+    if len(records)!=len(rows) or len(set(rows))!=len(rows):
+        raise ValueError('Неверные строки назначения.')
+    requests=[]
+    if max(rows)>row_count:
+        requests.append({'appendDimension':{'sheetId':sheet_id,'dimension':'ROWS','length':max(rows)-row_count}})
+    for record,row in zip(records,rows):
+        requests.append({'updateCells':{
+            'range':{'sheetId':sheet_id,'startRowIndex':row-1,'endRowIndex':row,
+                     'startColumnIndex':1,'endColumnIndex':3},
+            'fields':'userEnteredValue','rows':[{'values':[
+                {'userEnteredValue':{'stringValue':record['address']}},
+                {'userEnteredValue':{'stringValue':record['seed']}}]}]}})
+    return {'requests':requests}
 
 def prepare_cfg(count):
     from app import settings,db
@@ -104,6 +140,7 @@ def prepare_cfg(count):
     if len(matches)!=1 or matches[0].get('sheetType','GRID')!='GRID':
         raise ValueError('Лист Google не найден или не является обычной таблицей.')
     cfg['sheet_id']=matches[0]['sheetId']
+    cfg['row_count']=matches[0]['gridProperties']['rowCount']
     header=read_range(cfg,token,'A1:C1')
     h=header[0] if header else []
     if len(h)<3 or 'адрес' not in str(h[1]).lower() and 'address' not in str(h[1]).lower():
@@ -114,8 +151,9 @@ def prepare_cfg(count):
     addresses={str(r[0]).strip().lower() for r in existing if r and re.fullmatch(r'0x[0-9a-fA-F]{40}',str(r[0]).strip())}
     with db() as c:
         addresses.update(r['address'].lower() for r in c.execute('SELECT address FROM wallets'))
-    if len(existing)+count>=5000 or len(addresses)+count>500:
+    if len(addresses)+count>500:
         raise ValueError('Превышен предел: 500 кошельков в проекте или 4999 строк листа.')
+    cfg['target_rows']=vacant_rows(cfg,token,count)
     return cfg,token
 
 def generate(ident,count):
@@ -141,7 +179,7 @@ def generate(ident,count):
     # Persist dispatch intent BEFORE the single append. No automatic re-append.
     with db() as c:c.execute("UPDATE generated_batches SET state='sending' WHERE id=?",(ident,))
     try:
-        request_google(cfg,token,':batchUpdate',append_payload(cfg['sheet_id'],records))
+        request_google(cfg,token,':batchUpdate',append_payload(cfg['sheet_id'],records,cfg['target_rows'],cfg['row_count']))
     except RemoteError:
         with db() as c:c.execute("UPDATE generated_batches SET state='uncertain',error=? WHERE id=?",
             ('Ответ Google не подтверждён. Нажмите «Проверить запись»; повторной генерации не будет.',ident))
