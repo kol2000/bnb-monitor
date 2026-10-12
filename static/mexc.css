@@ -1,1 +1,28 @@
 #mexc-balances{white-space:pre-line;font-size:18px;line-height:1.9}.mexc-address{overflow-wrap:anywhere;word-break:break-word}.mexc-job{padding:18px 0;border-bottom:1px solid var(--line)}.mexc-job:last-child{border-bottom:0}#tab-mexc>.card,#tab-mexc>.settings-grid{margin-bottom:20px}#mexc-network{display:block;width:100%;padding:12px;margin-top:8px;background:var(--surface);color:var(--text);border:1px solid var(--line);border-radius:9px}.tabs{overflow-x:auto;white-space:nowrap}
+
+/* Prominent exchange actions in both light and dark themes. */
+#tab-mexc #mexc-sell {
+  background: #f59e0b;
+  color: #111827;
+  border-color: #d97706;
+  font-weight: 700;
+}
+#tab-mexc #mexc-sell:hover:not(:disabled) {
+  background: #fbbf24;
+  filter: none;
+}
+#tab-mexc button[data-mexc-check] {
+  background: #2563eb;
+  color: #ffffff;
+  border-color: #1d4ed8;
+  font-weight: 700;
+}
+#tab-mexc button[data-mexc-check]:hover:not(:disabled) {
+  background: #1d4ed8;
+  filter: none;
+}
+#tab-mexc #mexc-sell:focus-visible,
+#tab-mexc button[data-mexc-check]:focus-visible {
+  outline: 3px solid #60a5fa;
+  outline-offset: 3px;
+}
