@@ -2,14 +2,14 @@
 
 /* Prominent exchange actions in both light and dark themes. */
 #tab-mexc #mexc-sell {
-  background: #f59e0b;
-  color: #111827;
-  border-color: #d97706;
-  font-weight: 700;
+  background: var(--yellow);
+  color: #15191e;
+  border-color: transparent;
+  font-weight: 600;
 }
 #tab-mexc #mexc-sell:hover:not(:disabled) {
-  background: #fbbf24;
-  filter: none;
+  background: var(--yellow);
+  filter: brightness(1.12);
 }
 #tab-mexc button[data-mexc-check] {
   background: #2563eb;
