@@ -1,12 +1,16 @@
 'use strict';
 let mexcBusy=false;
+function mexcCanSellBnb(value){
+ const match=/^(\d+)(?:\.(\d+))?$/.exec(String(value));
+ return !!match && (/[1-9]/.test(match[1]) || /[1-9]/.test((match[2]||'').slice(0,4)));
+}
 const mexcStates={buying:'Проверка покупки',bought:'BNB куплен — ожидает вывода',withdrawing:'Вывод обрабатывается',done:'Вывод завершён',closed:'Операция закрыта'};
 const mexcWithdrawStates={1:'Заявка',2:'Проверка',3:'Ожидание',4:'Обработка',5:'Подготовка',6:'Подтверждения сети',7:'Завершён',8:'Ошибка',9:'Отменён',10:'Ручная проверка'};
 async function mexcAction(fn){
  if(mexcBusy)return;
  mexcBusy=true;
  $('tab-mexc').querySelectorAll('button').forEach(b=>b.disabled=true);
- try{await fn();}catch(e){toast(e.message,true);}finally{mexcBusy=false;$('tab-mexc').querySelectorAll('button').forEach(b=>b.disabled=false);await refreshMexcJobs();}
+ try{await fn();}catch(e){toast(e.message,true);}finally{mexcBusy=false;$('tab-mexc').querySelectorAll('button').forEach(b=>b.disabled=b.dataset.sellUnavailable==='true');await refreshMexcJobs();}
 }
 async function refreshMexcJobs(){
  if(!loggedIn)return;
@@ -25,7 +29,7 @@ function refreshMexcData(){return mexcAction(async()=>{
  if(!$('mexc-history').innerHTML.trim())$('mexc-history').innerHTML='<tr><td colspan="4">Загрузка истории выводов…</td></tr>';
  try{
  const d=await api('mexc/refresh','POST',{});
- $('mexc-balances').innerHTML=['USDT','BNB'].map(asset=>{const b=d.balances.find(x=>x.asset===asset)||{free:'0',locked:'0'};return `<div>${asset}: доступно ${escapeHtml(b.free)} · заблокировано ${escapeHtml(b.locked)} ${asset==='BNB'&&Number(b.free)>0?'<button type="button" id="mexc-sell" class="secondary">Продать</button>':''}</div>`;}).join('');
+ $('mexc-balances').innerHTML=['USDT','BNB'].map(asset=>{const b=d.balances.find(x=>x.asset===asset)||{free:'0',locked:'0'};return `<div>${asset}: доступно ${escapeHtml(b.free)} · заблокировано ${escapeHtml(b.locked)} ${asset==='BNB'?`<button type="button" id="mexc-sell" class="secondary" data-sell-unavailable="${!mexcCanSellBnb(b.free)}" ${!mexcCanSellBnb(b.free)?'disabled title="Для продажи нужно минимум 0,0001 BNB"':''}>Продать</button>`:''}</div>`;}).join('');
  $('mexc-updated').textContent='Обновлено: '+date(d.updated);
  const old=$('mexc-network').value;
  $('mexc-network').innerHTML='<option value="">Выберите сеть получателя</option>'+d.networks.filter(n=>n.withdrawEnable).map(n=>`<option value="${escapeHtml(n.netWork)}">${escapeHtml(n.netWork)} · комиссия ${escapeHtml(n.withdrawFee)} BNB · минимум ${escapeHtml(n.withdrawMin)}</option>`).join('');
@@ -58,7 +62,8 @@ $('mexc-jobs').onclick=e=>{
 };
 
 $('mexc-balances').addEventListener('click',e=>{
- if(!e.target.closest('#mexc-sell'))return;
+ const sell=e.target.closest('#mexc-sell');
+ if(!sell||sell.disabled||sell.dataset.sellUnavailable==='true')return;
  mexcAction(async()=>{
   const j=await api('mexc/sell-preview','POST',{});
   const d=j.data;
