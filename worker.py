@@ -255,8 +255,6 @@ def run():
         import mexc, maintenance
         threading.Thread(target=mexc.run, args=(stop,), name='mexc-status', daemon=True).start()
         threading.Thread(target=maintenance.run, args=(stop,), name='seed-audit', daemon=True).start()
-        import wallet_archive
-        threading.Thread(target=wallet_archive.run, args=(stop,), name='wallet-archive', daemon=True).start()
         next_check = 0
         next_sync = 0
         next_price = 0

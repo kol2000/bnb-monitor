@@ -8,7 +8,6 @@ from functools import wraps
 from urllib.parse import quote
 from urllib.request import Request, build_opener, HTTPRedirectHandler
 from eth_account import Account
-from sheets_guard import serialized_sheets
 
 PATH = "m/44'/60'/0'/0/0"
 MAX_BATCH = 100
@@ -250,13 +249,11 @@ def install(app):
         return {'items':[public(r) for r in rows],'tab':cfg.get('sheets_tab',''),'enabled':bool(cfg.get('sheets_enabled'))}
     @app.post('/api/generator')
     @locked
-    @serialized_sheets
     def generator_create():
         d=request.get_json() or {}
         return generate(d.get('id'),d.get('count'))
     @app.post('/api/generator/<ident>/check')
     @locked
-    @serialized_sheets
     def generator_check(ident):
         if not re.fullmatch('[a-f0-9]{32}',ident):raise ValueError('Неверный идентификатор.')
         return verify(ident)

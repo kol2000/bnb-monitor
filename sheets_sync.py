@@ -2,7 +2,6 @@
 import json
 import re
 import time
-from sheets_guard import serialized_sheets
 from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
@@ -126,7 +125,6 @@ def apply_rows(rows, source=None):
     return {'added': added, 'renamed': renamed, 'invalid': invalid,
             'duplicates': duplicates, 'valid': len(unique)}
 
-@serialized_sheets
 def sync_once():
     cfg = settings()
     set_status(sheets_requested=False, sheets_attempt=time.time())
@@ -183,7 +181,6 @@ def balance_updates(header, rows, balances, tab, asset='BNB'):
                             'values': [[float(bnb(balances[address]))]]})
     return updates
 
-@serialized_sheets
 def export_balances(cycle_started):
     cfg = settings()
     if not cfg['sheets_enabled']:

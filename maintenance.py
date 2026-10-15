@@ -3,7 +3,6 @@ import json
 import re
 import secrets
 import time
-from sheets_guard import serialized_sheets
 
 
 def get(c, key, default=None):
@@ -44,7 +43,6 @@ def snapshot(c):
     return [dict(r) for r in c.execute('SELECT id,address,name FROM wallets ORDER BY id')]
 
 
-@serialized_sheets
 def preview():
     from app import db, settings, RemoteError
     from sheets_sync import fetch_rows
@@ -61,7 +59,6 @@ def preview():
     return {'token':p['token'], 'removed':p['removed'], 'count':len(present), 'expires':p['created']+300}
 
 
-@serialized_sheets
 def confirm(token):
     from app import db, settings, RemoteError
     from sheets_sync import fetch_rows

@@ -37,7 +37,3 @@
 /* Wallet actions: green withdrawal and rename beside the wallet name. */
 .wallet-withdraw{color:var(--green)}
 .wallet-actions{grid-template-columns:max-content}
-
-#archive-panel summary{cursor:pointer;font-weight:700;padding:6px 0}
-#archive-panel .table-wrap{max-height:480px;overflow:auto;margin:16px 0}
-#archive-panel #archive-key-status{display:inline-block;margin-left:12px}

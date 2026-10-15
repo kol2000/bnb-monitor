@@ -197,10 +197,6 @@ def confirm(ident):
     # Atomic reservation, followed by durable signed bytes. No RPC sends in web.
     with db() as c:
         c.execute('BEGIN IMMEDIATE')
-        from wallet_archive import assert_not_archiving
-        assert_not_archiving(c, plan['source'])
-        if not c.execute('SELECT 1 FROM wallets WHERE id=? AND address=?',(row['wallet_id'],plan['source'])).fetchone():
-            raise ValueError('Кошелёк удалён из активного списка. Повторите расчёт.')
         current = c.execute('SELECT * FROM withdrawals WHERE id=?', (ident,)).fetchone()
         if current['state'] != 'preview':
             return public(current)

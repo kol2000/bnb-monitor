@@ -19,10 +19,3 @@ assert(context.checkLine('BNB',Date.now()/1000-600,'').includes('устарел'
 assert(context.checkLine('BNB',Date.now()/1000,'timeout').includes('Последний успешный баланс сохранён'));
 assert(context.checkLine('USDT',0,'',false).includes('Выключен'));
 console.log('Wallet search, filters and freshness: OK');
-const archiveSource=fs.readFileSync('static/archive.js','utf8');
-vm.runInContext(archiveSource.slice(archiveSource.indexOf('function archiveZero'),archiveSource.indexOf('function renderArchive')),context);
-assert(context.archiveZero({bnb:'0',usdt:'0.000000'}));
-assert(!context.archiveZero({bnb:'0.000000000000000001',usdt:'0'}));
-assert(!context.archiveZero({bnb:null,usdt:'0'}));
-assert(!context.archiveZero({bnb:'0',usdt:null}));
-console.log('Archive zero-balance selection: OK');

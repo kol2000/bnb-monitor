@@ -22,7 +22,6 @@ from email.utils import make_msgid
 import withdrawals
 import mexc
 import wallet_generator
-import wallet_archive
 
 DATA = Path(os.environ.get('DATA_DIR', '/data'))
 DATA.mkdir(parents=True, exist_ok=True)
@@ -80,7 +79,6 @@ def init_db():
         withdrawals.schema(c)
         mexc.schema(c)
         wallet_generator.schema(c)
-        wallet_archive.schema(c)
         c.execute('BEGIN IMMEDIATE')
         columns = {r['name'] for r in c.execute('PRAGMA table_info(wallets)')}
         for name, kind in [('usdt_balance', 'TEXT'), ('usdt_block', 'INTEGER'),
@@ -523,4 +521,3 @@ mexc.install(app)
 wallet_generator.install(app)
 import maintenance
 maintenance.install(app)
-wallet_archive.install(app)
