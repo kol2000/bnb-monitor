@@ -63,7 +63,20 @@ const short=a=>a.slice(0,8)+'…'+a.slice(-6);
 
 const sortModes = ['balance-desc', 'balance-asc', 'name-asc', 'name-desc', 'usdt-desc', 'usdt-asc'];
 let walletSort = 'balance-desc', walletRows = [];
-let hideSmallBalances = false, usdtEnabled = true;
+let hideSmallBalances = false, usdtEnabled = true, staleAfter = 300;
+function matchesWalletSearch(w){
+ const q=$('wallet-search').value.trim().toLowerCase();
+ if(q&&!`${w.name} ${w.address}`.toLowerCase().includes(q))return false;
+ switch($('wallet-filter').value){
+ case 'bnb':return w.balance!=null&&BigInt(w.balance)>0n;
+ case 'usdt':return usdtEnabled&&w.usdt_balance!=null&&BigInt(w.usdt_balance)>0n;
+ case 'unnamed':return !w.name||w.name.toLowerCase()===w.address.slice(0,8).toLowerCase();
+ case 'error':return !!(w.error||(usdtEnabled&&w.usdt_error));
+ default:return true;
+ }
+}
+$('wallet-search').oninput=()=>renderWallets();
+$('wallet-filter').onchange=()=>renderWallets();
 try {
   const saved = localStorage.getItem('bnb-monitor-wallet-sort');
   if (sortModes.includes(saved)) walletSort = saved;
@@ -91,17 +104,18 @@ function compareWallets(a, b) {
   return (walletSort.endsWith('-desc') ? -order : order) || tie;
 }
 function checkLine(asset, checked, error, enabled=true) {
-  const stamp = !enabled ? 'Выключен' : !checked ? 'Ещё не проверен' :
-    new Date(checked*1000).toLocaleString('ru-RU', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'});
-  const detail = !enabled ? 'Проверка выключена' : (error ? 'Ошибка: '+error+' · Последняя проверка: ' : '') + date(checked);
-  return `<small class="check-line ${enabled && error ? 'negative' : ''}" title="${escapeHtml(detail)}">${asset}: ${escapeHtml(stamp)}${enabled && error ? ' ⚠' : ''}</small>`;
+ const age=checked?Math.max(0,Math.floor(Date.now()/1000-checked)):null;
+ const stale=age!==null&&age>staleAfter;
+ const stamp=!enabled?'Выключен':age===null?'Ещё не проверен':age<60?`${age} сек. назад`:age<3600?`${Math.floor(age/60)} мин. назад`:`${Math.floor(age/3600)} ч. назад`;
+ const detail=(error?'Ошибка: '+error+'. Последний успешный баланс сохранён. ':'')+date(checked);
+ return `<small class="check-line ${enabled&&(error||stale)?'negative':''}" title="${escapeHtml(detail)}">${asset}: ${escapeHtml(stamp)}${enabled&&error?' · ошибка':enabled&&stale?' · устарел':''}</small>`;
 }
 
 function renderWallets() {
- const wallets = walletRows.filter(matchesBalanceFilter).sort(compareWallets);
+ const wallets = walletRows.filter(matchesBalanceFilter).filter(matchesWalletSearch).sort(compareWallets);
  $('wallet-empty').hidden=walletRows.length>0;
  $('wallet-filter-empty').hidden=walletRows.length===0 || wallets.length>0;
- $('wallet-visible-count').textContent=hideSmallBalances?'Показано: '+wallets.length+' из '+walletRows.length:'';
+ $('wallet-visible-count').textContent='Показано: '+wallets.length+' из '+walletRows.length;
  $('wallet-list').innerHTML=wallets.map(w=>`<tr><td><div class="name">${escapeHtml(w.name)} <button class="quiet" data-rename="${w.id}" data-name="${escapeHtml(w.name)}" title="Переименовать" aria-label="Редактировать название кошелька">✎</button> <button class="quiet" data-copy="${escapeHtml(w.name)}" data-copy-kind="name" title="Копировать название кошелька" aria-label="Копировать название кошелька">⧉</button></div><small><a class="mono" title="${escapeHtml(w.address)}" href="https://bscscan.com/address/${w.address}" target="_blank" rel="noopener noreferrer">${short(w.address)} ↗</a> <button class="quiet" data-copy="${w.address}" title="Копировать адрес">⧉</button></small></td><td class="mono">${w.bnb===null?'—':escapeHtml(w.bnb)}${w.balance != null && BigInt(w.balance)>0n ? `<small><button class="quiet wallet-withdraw" data-withdraw="${w.id}" ${withdrawalBusy?'disabled':''}>Вывести</button></small>` : ''}</td><td class="mono">${escapeHtml(w.usd ?? '—')}</td><td class="mono" title="${escapeHtml(usdtEnabled && w.usdt != null ? w.usdt + ' USDT' : '')}">${usdtEnabled ? (w.usdt == null ? '—' : '$' + formatUsdtTotal(w.usdt).replace(/\s/g,'').replace(',','.')) : 'Выключен'}</td><td class="wallet-checks">${checkLine('BNB', w.checked, w.error)}${checkLine('USDT', w.usdt_checked, w.usdt_error, usdtEnabled)}</td><td><input aria-label="Уведомления ${escapeHtml(w.name)}" type="checkbox" data-notify="${w.id}" ${w.notify?'checked':''}></td><td><div class="wallet-actions"><button class="quiet wallet-refresh" data-check="${w.id}" title="Принудительно обновить баланс сейчас" aria-label="Обновить баланс ${escapeHtml(w.name)}" ${checkingWallet !== null ? 'disabled' : ''}>${checkingWallet === String(w.id) ? 'Обновление…' : '↻ Обновить'}</button><button class="quiet danger wallet-delete" data-delete="${w.id}" title="Удалить кошелёк">Удалить</button></div></td></tr>`).join('');
 }
 $('wallet-sort').value = walletSort;
@@ -152,7 +166,7 @@ async function refresh(){
  $('monitor-status').className='status-title '+(stale||s.error?'negative':'positive');
  $('last-check').textContent=s.last_cycle?'Цикл: '+date(s.last_cycle):'Ожидание первого цикла';
  $('rpc-error').hidden=!(stale||s.error);$('rpc-error').textContent=stale?'Фоновый процесс не отвечает. Проверьте: sudo docker compose ps и sudo docker compose logs worker':s.error;
- walletRows=d.wallets;renderWallets();
+ staleAfter=Math.max(180,Number(d.settings.interval)*2+Math.max(0,s.last_cycle_duration||0));walletRows=d.wallets;renderWallets();
  const ec=d.settings;
  if(!loadedEmail){
   $('email-enabled').checked=ec.email_enabled;

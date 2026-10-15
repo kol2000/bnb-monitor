@@ -16,6 +16,8 @@ async function refreshMexcJobs(){
  if(!loggedIn)return;
  try{
  const result=await api('mexc/jobs');
+ if(result.cache?.mexc_balances)renderMexcBalances(result.cache.mexc_balances);
+ $('mexc-auto').textContent=result.cache?.mexc_balance_error||('Автопроверка: '+date(result.cache?.mexc_poll?.checked)+'. Повторная покупка или отправка не выполняется.');
  $('mexc-jobs').innerHTML=result.items.map(j=>{const d=j.data;if(d.action==='sell')return `<article class="mexc-job"><strong>${escapeHtml(j.state==='done'?'Продажа завершена':j.state==='closed'?'Продажа закрыта':'Проверка продажи')}</strong> · ${date(j.created)}<p>Продажа BNB: ${escapeHtml(d.sold||d.quantity)}<br>Получено USDT: ${escapeHtml(d.received_usdt||'ожидается')}</p>${d.order_id?`<small>Ордер: ${escapeHtml(d.order_id)}</small>`:''}${j.error?`<p class="negative">${escapeHtml(j.error)}</p>`:''}${j.state==='buying'?`<button type="button" class="secondary" data-mexc-check="${j.id}">Проверить статус</button>`:''}</article>`;return `<article class="mexc-job"><strong>${escapeHtml(mexcStates[j.state]||j.state)}</strong> · ${date(j.created)}<p>Покупка: ${escapeHtml(d.total)} USDT · BNB: ${escapeHtml(d.bought||'ожидается')}<br>Сеть: ${escapeHtml(d.network)} · Получатель: <span class="mexc-address">${escapeHtml(d.address)}</span></p>${d.order_id?`<small>Ордер: ${escapeHtml(d.order_id)}</small>`:''}${d.withdraw_id?`<small>Вывод: ${escapeHtml(d.withdraw_id)} · ${escapeHtml(mexcWithdrawStates[d.withdraw_status]||'Принят')}</small>`:''}${d.txid?`<p class="mexc-address">Tx: ${escapeHtml(d.txid)}</p>`:''}${j.error?`<p class="negative">${escapeHtml(j.error)}</p>`:''}${['buying','withdrawing'].includes(j.state)?`<button type="button" class="secondary" data-mexc-check="${j.id}">Проверить статус</button>`:''}${j.state==='bought'?`<button type="button" data-mexc-withdraw="${j.id}">Рассчитать вывод BNB</button> <button type="button" class="quiet" data-mexc-keep="${j.id}">Оставить BNB на бирже</button>`:''}</article>`;}).join('')||'<p class="muted">Операций из приложения пока нет.</p>';
  }catch(e){toast(e.message,true);}
 }
@@ -29,7 +31,7 @@ function refreshMexcData(){return mexcAction(async()=>{
  if(!$('mexc-history').innerHTML.trim())$('mexc-history').innerHTML='<tr><td colspan="4">Загрузка истории выводов…</td></tr>';
  try{
  const d=await api('mexc/refresh','POST',{});
- $('mexc-balances').innerHTML=['USDT','BNB'].map(asset=>{const b=d.balances.find(x=>x.asset===asset)||{free:'0',locked:'0'};return `<div>${asset}: доступно ${escapeHtml(b.free)} · заблокировано ${escapeHtml(b.locked)} ${asset==='BNB'?`<button type="button" id="mexc-sell" class="secondary" data-sell-unavailable="${!mexcCanSellBnb(b.free)}" ${!mexcCanSellBnb(b.free)?'disabled title="Для продажи нужно минимум 0,0001 BNB"':''}>Продать</button>`:''}</div>`;}).join('');
+ renderMexcBalances(d);
  $('mexc-updated').textContent='Обновлено: '+date(d.updated);
  const old=$('mexc-network').value;
  $('mexc-network').innerHTML='<option value="">Выберите сеть получателя</option>'+d.networks.filter(n=>n.withdrawEnable).map(n=>`<option value="${escapeHtml(n.netWork)}">${escapeHtml(n.netWork)} · комиссия ${escapeHtml(n.withdrawFee)} BNB · минимум ${escapeHtml(n.withdrawMin)}</option>`).join('');
@@ -49,7 +51,7 @@ $('mexc-buy-form').onsubmit=e=>{e.preventDefault();mexcAction(async()=>{
  const d=j.data;
  if(!confirm(`Купить BNB по рынку?\n\nВведено: ${d.amount} USDT\nДобавка: 0,10 USDT\nСумма ордера: ${d.total} USDT\nОриентировочно: ${d.estimate} BNB (до торговой комиссии).\n\nЗатем отдельное подтверждение вывода:\n${d.network}\n${d.address}\n\nРыночная цена может измениться.`))return;
  await api('mexc/'+j.id+'/buy','POST',{});
- toast('Запрос покупки обработан. Проверьте статус в журнале перед выводом.');
+ toast('Запрос покупки обработан. Статус обновится автоматически.');
  });};
 $('mexc-jobs').onclick=e=>{
  const b=e.target.closest('button');if(!b)return;
@@ -57,7 +59,7 @@ $('mexc-jobs').onclick=e=>{
  if(b.dataset.mexcCheck){await api('mexc/'+b.dataset.mexcCheck+'/check','POST',{});return;}
  if(b.dataset.mexcKeep){if(confirm('Оставить купленный BNB на бирже и закрыть эту операцию?'))await api('mexc/'+b.dataset.mexcKeep+'/keep','POST',{});return;}
  if(b.dataset.mexcWithdraw){const id=b.dataset.mexcWithdraw;const j=await api('mexc/'+id+'/withdraw-preview','POST',{});const p=j.data.withdraw_plan;
- if(confirm(`Подтвердить вывод BNB с MEXC?\n\nСеть: ${p.network}\nАдрес: ${p.address}\nMemo: ${p.memo||'нет'}\nСумма заявки: ${p.amount} BNB\nКомиссия MEXC: ${p.fee} BNB\n\nКомиссия дополнительно зарезервирована из купленного BNB. Если биржа удерживает её из суммы заявки, получатель получит меньше; на бирже останется резерв.\n\nПроверьте адрес и сеть. Перевод необратим.`)){await api('mexc/'+id+'/withdraw','POST',{});toast('Проверьте статус вывода в журнале.');}}
+ if(confirm(`Подтвердить вывод BNB с MEXC?\n\nСеть: ${p.network}\nАдрес: ${p.address}\nMemo: ${p.memo||'нет'}\nСумма заявки: ${p.amount} BNB\nКомиссия MEXC: ${p.fee} BNB\n\nКомиссия дополнительно зарезервирована из купленного BNB. Если биржа удерживает её из суммы заявки, получатель получит меньше; на бирже останется резерв.\n\nПроверьте адрес и сеть. Перевод необратим.`)){await api('mexc/'+id+'/withdraw','POST',{});toast('Статус вывода обновится автоматически.');}}
  });
 };
 
@@ -69,6 +71,19 @@ $('mexc-balances').addEventListener('click',e=>{
   const d=j.data;
   if(!confirm(`Продать весь доступный BNB на споте MEXC за USDT по рынку?\n\nДоступно: ${d.available} BNB\nК продаже: ${d.quantity} BNB\nОстаток из-за округления: ${d.dust} BNB\nОриентировочно: ${d.estimate} USDT до комиссии.\n\nИтог зависит от рыночной цены. Заблокированный BNB не продаётся.`))return;
   await api('mexc/'+j.id+'/sell','POST',{});
-  toast('Запрос продажи обработан. Нажмите «Проверить статус» в журнале.');
+  toast('Запрос продажи обработан. Статус обновится автоматически.');
  });
 });
+
+let mexcBalanceAt=0, mexcPolling=false;
+function renderMexcBalances(d){
+ if(d.updated<mexcBalanceAt)return;
+ mexcBalanceAt=d.updated;
+ $('mexc-updated').classList.remove('negative');
+ $('mexc-balances').innerHTML=['USDT','BNB'].map(asset=>{const b=d.balances.find(x=>x.asset===asset)||{free:'0',locked:'0'};return `<div>${asset}: доступно ${escapeHtml(b.free)} · заблокировано ${escapeHtml(b.locked)} ${asset==='BNB'?`<button type="button" id="mexc-sell" class="secondary" data-sell-unavailable="${!mexcCanSellBnb(b.free)}" ${!mexcCanSellBnb(b.free)?'disabled title="Для продажи нужно минимум 0,0001 BNB"':''}>Продать</button>`:''}</div>`;}).join('');
+ $('mexc-updated').textContent='Баланс обновлён: '+date(d.updated);
+}
+setInterval(async()=>{
+ if(!loggedIn||document.hidden||$('tab-mexc').hidden||mexcBusy||mexcPolling)return;
+ mexcPolling=true;try{await refreshMexcJobs();}finally{mexcPolling=false;}
+},5000);

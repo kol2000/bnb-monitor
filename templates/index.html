@@ -7,6 +7,7 @@
   <script src="/static/app.js" defer></script>
   <script src="/static/mexc.js" defer></script>
   <script src="/static/generator.js" defer></script>
+  <script src="/static/maintenance.js" defer></script>
   <link rel="stylesheet" href="/static/mexc.css">
 </head>
 <body>
@@ -22,6 +23,7 @@
     <nav class="tabs"><button class="tab active" data-tab="wallets">Кошельки</button><button class="tab" data-tab="mexc">Биржа MEXC</button><button class="tab" data-tab="generator">Генератор кошельков</button><button class="tab" data-tab="history">История изменений</button><button class="tab" data-tab="withdrawals">Переводы</button><button class="tab" data-tab="settings">Настройки</button></nav>
     <section id="tab-wallets">
       <div class="card add-card"><div><h2>Добавить кошельки</h2><p class="muted small">Один адрес на строку. Можно добавить название через пробел.</p></div><form id="wallet-form"><textarea id="addresses" rows="3" placeholder="0x… Основной кошелёк&#10;0x… Резервный" required spellcheck="false"></textarea><button type="submit">+ Добавить адреса</button></form></div>
+      <div class="settings-grid"><label>Поиск по имени или адресу<input id="wallet-search" type="search" placeholder="Email или 0x…"></label><label>Показать<select id="wallet-filter"><option value="all">Все кошельки</option><option value="bnb">С балансом BNB</option><option value="usdt">С балансом USDT</option><option value="unnamed">Без имени</option><option value="error">С ошибками проверки</option></select></label></div>
       <label class="wallet-sort-label" for="wallet-sort">Сортировка кошельков
         <select id="wallet-sort">
           <option value="balance-desc">Баланс BNB: сначала большие</option>
@@ -32,7 +34,7 @@
       </label>
       <label class="check-label"><input id="hide-small-balances" type="checkbox"> BNB от $0.01 или USDT от 0.01</label>
       <p id="wallet-visible-count" class="muted small" aria-live="polite"></p>
-      <div class="table-wrap card"><table><thead><tr><th>Кошелёк / адрес</th><th>Баланс BNB</th><th>≈ USD (BNB)</th><th>Баланс USDT</th><th>Проверка</th><th>Уведомления</th><th></th></tr></thead><tbody id="wallet-list"></tbody></table><div id="wallet-empty" class="empty"><div class="empty-icon">◇</div><h2>Начните с первого кошелька</h2><p>Добавьте публичный BSC-адрес выше.<br>Баланс появится после ближайшей проверки.</p></div><div id="wallet-filter-empty" class="empty" hidden>Нет кошельков с BNB от $0.01 или USDT от 0.01. Отключите фильтр, чтобы увидеть все адреса.</div></div>
+      <div class="table-wrap card"><table><thead><tr><th>Кошелёк / адрес</th><th>Баланс BNB</th><th>≈ USD (BNB)</th><th>Баланс USDT</th><th>Проверка</th><th>Уведомления</th><th></th></tr></thead><tbody id="wallet-list"></tbody></table><div id="wallet-empty" class="empty"><div class="empty-icon">◇</div><h2>Начните с первого кошелька</h2><p>Добавьте публичный BSC-адрес выше.<br>Баланс появится после ближайшей проверки.</p></div><div id="wallet-filter-empty" class="empty" hidden>Нет кошельков, соответствующих поиску и фильтрам.</div></div>
     </section>
     <section id="tab-generator" hidden>
       <form class="card" id="generator-form">
@@ -50,7 +52,7 @@
     <section id="tab-mexc" hidden>
       <div class="card"><div class="section-heading"><h2>Спотовый аккаунт MEXC</h2><button id="mexc-refresh" class="secondary" type="button">Проверить баланс и выводы</button></div><p id="mexc-balances">Нажмите «Проверить баланс и выводы», чтобы загрузить данные биржи и сети.</p><small id="mexc-updated">Ключи хранятся только на сервере.</small></div>
       <div class="settings-grid"><form class="card" id="mexc-buy-form"><h2>Купить BNB → вывести на кошелёк</h2><label>Сумма USDT<input id="mexc-amount" type="number" min="0.01" step="0.01" required placeholder="50.00"></label><p class="muted small">К сумме ордера добавляется 0,10 USDT: 50 → 50,10. Торговая комиссия и комиссия вывода рассчитываются биржей отдельно.</p><label>Сеть получателя<select id="mexc-network" required><option value="">Сначала загрузите сети</option></select></label><label>Адрес кошелька<input id="mexc-address" required placeholder="0x…" autocomplete="off"></label><label>Memo / тег (если требуется получателю)<input id="mexc-memo" maxlength="128" autocomplete="off"></label><button type="submit">Рассчитать покупку</button></form>
-      <div class="card"><h2>Покупка и вывод</h2><p>После покупки нажмите «Проверить статус», затем «Рассчитать вывод BNB». Перед отправкой вы увидите сумму, адрес, сеть и комиссию.</p><p class="muted">Выводится только BNB этой покупки с резервом на комиссию. При неопределённом ответе повторная отправка блокируется до сверки с биржей.</p><h2>Операции приложения</h2><div id="mexc-jobs"></div></div></div>
+      <div class="card"><h2>Покупка и вывод</h2><p>Статус покупки обновляется автоматически. После исполнения нажмите «Рассчитать вывод BNB». Перед отправкой вы увидите сумму, адрес, сеть и комиссию.</p><p class="muted">Выводится только BNB этой покупки с резервом на комиссию. При неопределённом ответе повторная отправка блокируется до сверки с биржей.</p><h2>Операции приложения</h2><p id="mexc-auto" class="muted small"></p><div id="mexc-jobs"></div></div></div>
       <div class="card"><h2>Выводы BNB с MEXC за 7 дней</h2><p class="muted small">Включая выводы, созданные вне приложения. Данные обновляются кнопкой проверки баланса.</p><div class="table-wrap"><table><thead><tr><th>Время</th><th>Сумма</th><th>Получатель / сеть</th><th>Статус / транзакция</th></tr></thead><tbody id="mexc-history"></tbody></table></div></div>
     </section>
     <section id="tab-withdrawals" hidden><div id="withdrawal-history" class="card"><h2>Журнал переводов BNB</h2><p class="muted small">Последние 30 операций: маршрут, сумма, статус и ссылки на транзакции.</p><div id="withdrawal-items"></div><div id="withdrawal-empty" class="empty">Выводов пока нет.</div></div></section>
@@ -62,6 +64,8 @@
       <p class="muted small">Столбец A — имя/email, B — BSC-адрес. Новые адреса добавляются, имена обновляются. Раз в 24 часа все адреса, отсутствующие в таблице, удаляются из мониторинга, включая добавленные вручную. История сохраняется. Пустой лист удалит все кошельки при очередной сверке. При ошибке чтения или неверных адресах удаление отменяется. Если удалить кошелёк только в панели, синхронизация добавит его снова.</p>
       <p class="muted small">Для записи балансов добавьте в первую строку заголовки «остаток BNB (BSC)» и «остаток USDT (BSC)» в разные свободные столбцы после A и B. Приложение не создаёт столбцы автоматически.</p><p id="google-key-status" class="muted small"></p><p id="google-status" class="small"></p>
       <div class="save-bar"><button type="submit">Сохранить Google</button><button type="button" class="secondary" id="google-sync">Синхронизировать сейчас</button></div></form></div>
+      <div class="card"><h2>Сверка списка Google</h2><p>Посмотреть кошельки, отсутствующие в таблице, и удалить их из мониторинга сейчас. История останется.</p><button id="reconcile-preview" type="button">Предпросмотр сверки</button><div id="reconcile-list"></div><button id="reconcile-confirm" type="button" hidden>Удалить перечисленные кошельки</button></div>
+      <div class="card"><h2>Проверка адресов и сид-фраз</h2><p>VM сверит адрес в B с первым аккаунтом сид-фразы из C. Сид-фразы и приватные ключи не возвращаются в браузер. Проверка не отправляет транзакций.</p><button id="audit-start" type="button">Проверить соответствие</button><p id="audit-status" role="status"></p><div id="audit-results"></div></div>
       <form id="withdrawal-form" class="card">
         <h2>Вывод BNB на биржу</h2>
         <label>Адрес биржи в сети BSC<input id="withdraw-destination" spellcheck="false" required pattern="0x[0-9a-fA-F]{40}"></label>
@@ -96,7 +100,3 @@
   <div id="toast" role="status" hidden></div>
 </main>
 </body></html>
-
-
-
-

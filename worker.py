@@ -39,7 +39,8 @@ def refresh_price():
 
 def check_once():
     cfg = settings()
-    set_status(check_requested=False, running=True, cycle_started=time.time())
+    started = time.time()
+    set_status(check_requested=False, running=True, cycle_started=started)
     try:
         with db() as c:
             wallets = [dict(r) for r in c.execute('SELECT * FROM wallets ORDER BY id')]
@@ -115,7 +116,7 @@ def check_once():
         set_status(last_cycle=time.time(), error=('; '.join(sorted({asset for _, asset in remaining})) + ': ' + last_error) if remaining else None,
                    rpc_index=used, wallet_count=len(wallets), failed=len(remaining))
     finally:
-        set_status(running=False)
+        set_status(running=False, last_cycle_duration=time.time()-started)
 
 def notification_usd(delta):
     """Use the cached quote at delivery time; missing USD must not block BNB alerts."""
@@ -251,6 +252,9 @@ def run():
         email_thread = threading.Thread(target=email_loop, name='email-delivery', daemon=True)
         email_thread.start()
         threading.Thread(target=withdrawals.run, args=(stop,), name='bnb-withdrawals', daemon=True).start()
+        import mexc, maintenance
+        threading.Thread(target=mexc.run, args=(stop,), name='mexc-status', daemon=True).start()
+        threading.Thread(target=maintenance.run, args=(stop,), name='seed-audit', daemon=True).start()
         next_check = 0
         next_sync = 0
         next_price = 0
@@ -293,7 +297,3 @@ if __name__ == '__main__':
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     signal.signal(signal.SIGINT, lambda *_: stop.set())
     run()
-
-
-
-

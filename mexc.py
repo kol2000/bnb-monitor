@@ -94,6 +94,59 @@ def schema(c):
         data TEXT NOT NULL, error TEXT NOT NULL DEFAULT '')''')
     c.execute("CREATE UNIQUE INDEX IF NOT EXISTS mexc_one_active ON mexc_jobs((1)) WHERE state IN ('buying','bought','withdrawing')")
 
+def poll_once():
+    """Read-only exchange reconciliation. Share the web dispatch lock."""
+    from app import DATA, db, set_status
+    with (DATA / 'mexc.lock').open('a') as handle:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return
+        with db() as c:
+            cached = c.execute("SELECT value FROM status WHERE key='mexc_poll'").fetchone()
+            schedule = json.loads(cached['value']) if cached else {}
+            rows = c.execute("SELECT id,state FROM mexc_jobs WHERE state IN ('buying','withdrawing')").fetchall()
+        now = time.time()
+        active = [[r['id'], r['state']] for r in rows]
+        if now < schedule.get('next_at', 0) and active == schedule.get('active'):
+            return
+        failures = 0
+        for row in rows:
+            try:
+                result = reconcile(row['id'])  # GET order / fills / history only
+                failures += bool(result['error'])
+            except Exception:
+                failures += 1
+        with db() as c:
+            current = [tuple(r) for r in c.execute("SELECT id,state FROM mexc_jobs WHERE state!='preview' ORDER BY created DESC LIMIT 50")]
+        # Refresh after any state change, including a manually reconciled operation.
+        current = [list(r) for r in current]
+        if current and (current != schedule.get('balances_for') or now-schedule.get('balance_at',0)>=60):
+            try:
+                a = account(Client())
+                set_status(mexc_balances={'updated': time.time(), 'balances':
+                    [b for b in a['balances'] if b['asset'] in ('BNB', 'USDT')]}, mexc_balance_error=None)
+                schedule['balances_for'] = current
+                schedule['balance_at'] = time.time()
+            except Exception:
+                failures += 1
+                set_status(mexc_balance_error='Не удалось обновить баланс MEXC. Повторим автоматически.')
+        schedule['failures'] = min(schedule.get('failures', 0) + 1, 4) if failures else 0
+        schedule['checked'] = now
+        schedule['active'] = active
+        schedule['next_at'] = time.time() + min(300, 20 * 2 ** schedule['failures'])
+        set_status(mexc_poll=schedule)
+
+
+def run(stop):
+    while not stop.is_set():
+        try:
+            poll_once()
+        except Exception:
+            pass  # No credentials or DB unavailable: never dispatch a replacement order.
+        stop.wait(5)
+
+
 def get_job(ident):
     from app import db
     with db() as c:
@@ -453,7 +506,10 @@ def install(app):
     def mexc_jobs():
         with db() as c:
             rows=c.execute("SELECT id FROM mexc_jobs WHERE state!='preview' ORDER BY created DESC LIMIT 50").fetchall()
-        return {'items':[get_job(r['id']) for r in rows]}
+        with db() as c:
+            cache = {r['key']: json.loads(r['value']) for r in c.execute(
+                "SELECT * FROM status WHERE key IN ('mexc_balances','mexc_balance_error','mexc_poll')")}
+        return {'items':[get_job(r['id']) for r in rows], 'cache':cache}
 
     @app.post('/api/mexc/refresh')
     def mexc_refresh():

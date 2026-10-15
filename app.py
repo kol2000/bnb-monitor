@@ -519,3 +519,5 @@ def request_check():
 withdrawals.install(app)
 mexc.install(app)
 wallet_generator.install(app)
+import maintenance
+maintenance.install(app)

@@ -107,6 +107,10 @@ def apply_rows(rows, source=None):
         if reconcile:
             removed = [w['id'] for address, w in existing.items() if address not in unique]
             for wid in removed:
+                if c.execute("SELECT 1 FROM withdrawals WHERE wallet_id=? AND state IN ('pending1','pending2','blocked')", (wid,)).fetchone():
+                    raise RemoteError('Сверка отложена: у удаляемого кошелька есть незавершённый перевод.')
+            for wid in removed:
+                c.execute("UPDATE email_outbox SET delivery='cancelled' WHERE delivery='pending' AND event_id IN (SELECT id FROM events WHERE wallet_id=?)", (wid,))
                 c.execute("UPDATE events SET delivery='cancelled' WHERE wallet_id=? AND delivery='pending'", (wid,))
                 c.execute('DELETE FROM wallets WHERE id=?', (wid,))
             for key, value in {'sheets_reconciled_at': now, 'sheets_removed': len(removed)}.items():
@@ -232,4 +236,3 @@ def export_balances(cycle_started):
         set_status(sheets_export_error=str(exc))
     except Exception:
         set_status(sheets_export_error='Не удалось записать балансы. Проверьте заголовок столбца и права Google.')
-
