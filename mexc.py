@@ -262,6 +262,8 @@ def buy_confirm(ident):
     network(client, d['network'])
     with db() as c:
         c.execute('BEGIN IMMEDIATE')
+        from wallet_archive import assert_not_archiving
+        assert_not_archiving(c, d.get('address',''))
         if c.execute("SELECT 1 FROM mexc_jobs WHERE state IN ('buying','bought','withdrawing')").fetchone():
             raise MexcError('Сначала завершите текущую операцию MEXC.')
         if not c.execute("UPDATE mexc_jobs SET state='buying' WHERE id=? AND state='preview'",(ident,)).rowcount:
@@ -396,6 +398,8 @@ def withdraw_confirm(ident):
     d['withdraw_time'] = time.time()
     with db() as c:
         c.execute('BEGIN IMMEDIATE')
+        from wallet_archive import assert_not_archiving
+        assert_not_archiving(c, d.get('address',''))
         if not c.execute("UPDATE mexc_jobs SET state='withdrawing',data=?,error='' WHERE id=? AND state='bought'",
                          (json.dumps(d),ident)).rowcount:
             raise MexcError('Вывод уже подтверждён.')
@@ -483,6 +487,8 @@ def sell_confirm(ident):
         raise MexcError('Баланс изменился. Рассчитайте продажу заново.')
     with db() as c:
         c.execute('BEGIN IMMEDIATE')
+        from wallet_archive import assert_not_archiving
+        assert_not_archiving(c, d.get('address',''))
         if c.execute("SELECT 1 FROM mexc_jobs WHERE state IN ('buying','bought','withdrawing')").fetchone():
             raise MexcError('Сначала завершите текущую операцию MEXC.')
         if not c.execute("UPDATE mexc_jobs SET state='buying' WHERE id=? AND state='preview'",(ident,)).rowcount:

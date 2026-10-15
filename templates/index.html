@@ -8,6 +8,7 @@
   <script src="/static/mexc.js" defer></script>
   <script src="/static/generator.js" defer></script>
   <script src="/static/maintenance.js" defer></script>
+  <script src="/static/archive.js" defer></script>
   <link rel="stylesheet" href="/static/mexc.css">
 </head>
 <body>
@@ -22,6 +23,14 @@
     <p class="notice">ⓘ Отслеживаем <strong>изменение баланса</strong>, не каждую транзакцию. Поступление и списание между проверками могут взаимно скрыться. Первый баланс — точка отсчёта, без уведомления.</p>
     <nav class="tabs"><button class="tab active" data-tab="wallets">Кошельки</button><button class="tab" data-tab="mexc">Биржа MEXC</button><button class="tab" data-tab="generator">Генератор кошельков</button><button class="tab" data-tab="history">История изменений</button><button class="tab" data-tab="withdrawals">Переводы</button><button class="tab" data-tab="settings">Настройки</button></nav>
     <section id="tab-wallets">
+      <details class="card" id="archive-panel"><summary>Архивация неактивных кошельков</summary>
+      <p>Проверка всего рабочего листа: нет операций в BSC более 30 суток → выбор кошельков → перенос в «bnb кошельки (архив)». Самостоятельно строки не перемещаются.</p>
+      <p class="muted small">Учитываются обычные и внутренние транзакции, токены и NFT, включая входящие операции. Кошельки без найденной истории исключаются: дату их создания нельзя определить. История монитора не заменяет проверку сети.</p>
+      <form id="archive-key-form"><label>Ключ Etherscan API V2<input id="archive-key" type="password" autocomplete="new-password" placeholder="Пустое поле — оставить сохранённый ключ"></label><p class="muted small">Для BSC (chainid 56) Etherscan требует платный тариф. Ключ сохраняется только на VM. Приложение не оформляет подписку.</p><label class="check-label"><input id="archive-clear-key" type="checkbox">Удалить ключ</label><button type="submit">Сохранить ключ истории</button><span id="archive-key-status"></span></form>
+      <div class="save-bar"><button id="archive-scan" type="button">Проверить неактивные кошельки</button><button id="archive-cancel" type="button" class="secondary" hidden>Отменить проверку</button><button id="archive-check" type="button" class="secondary" hidden>Проверить результат переноса</button></div>
+      <p id="archive-status" role="status" aria-live="polite"></p>
+      <div id="archive-preview" hidden><p>Выберите строки для переноса. Балансы ниже — последние данные монитора, время показано в подсказке. Кошельки с остатком не выбраны автоматически.</p><label class="check-label"><input id="archive-select-empty" type="checkbox">Выбрать кандидатов с известными нулевыми BNB и USDT</label><div class="table-wrap"><table><thead><tr><th></th><th>Кошелёк</th><th>Последняя операция</th><th>BNB / USDT</th><th>Результат</th></tr></thead><tbody id="archive-wallets"></tbody></table></div><p class="muted small">Переносится вся строка. Перед записью история проверяется повторно. Во время переноса не редактируйте и не сортируйте оба листа Google. После подтверждения переноса кошельки перестанут сканироваться, история событий сохранится.</p><button id="archive-confirm" type="button">Переместить выбранные в архив</button></div>
+      </details>
       <div class="card add-card"><div><h2>Добавить кошельки</h2><p class="muted small">Один адрес на строку. Можно добавить название через пробел.</p></div><form id="wallet-form"><textarea id="addresses" rows="3" placeholder="0x… Основной кошелёк&#10;0x… Резервный" required spellcheck="false"></textarea><button type="submit">+ Добавить адреса</button></form></div>
       <div class="settings-grid"><label>Поиск по имени или адресу<input id="wallet-search" type="search" placeholder="Email или 0x…"></label><label>Показать<select id="wallet-filter"><option value="all">Все кошельки</option><option value="bnb">С балансом BNB</option><option value="usdt">С балансом USDT</option><option value="unnamed">Без имени</option><option value="error">С ошибками проверки</option></select></label></div>
       <label class="wallet-sort-label" for="wallet-sort">Сортировка кошельков
