@@ -13,7 +13,53 @@ from urllib.parse import quote
 from eth_account import Account
 from eth_utils import to_checksum_address
 
-DEFAULTS = {'withdraw_destination': '0x2ce6195ccdf030fb7fd8d674995728ddcac2148b'}
+MEXC_DESTINATION = '0x2ce6195ccdf030fb7fd8d674995728ddcac2148b'
+DEFAULTS = {'withdraw_destination': MEXC_DESTINATION, 'withdraw_exchange': 'MEXC',
+            'withdraw_mexc_destination': MEXC_DESTINATION, 'withdraw_binance_destination': '',
+            'withdraw_custom_destination': ''}
+
+
+def exchange_label(address):
+    return 'MEXC' if address.lower() == MEXC_DESTINATION else 'Другая биржа'
+
+
+def migrate_destinations(c):
+    if c.execute("SELECT 1 FROM settings WHERE key='withdraw_exchange'").fetchone():
+        return
+    row = c.execute("SELECT value FROM settings WHERE key='withdraw_destination'").fetchone()
+    target = json.loads(row[0]) if row else MEXC_DESTINATION
+    values = dict(DEFAULTS)
+    values['withdraw_destination'] = target
+    values['withdraw_exchange'] = exchange_label(target)
+    if target.lower() != MEXC_DESTINATION:
+        values['withdraw_custom_destination'] = target
+    for key, value in values.items():
+        c.execute('INSERT OR IGNORE INTO settings(key,value) VALUES (?,?)', (key,json.dumps(value)))
+
+
+def destination_settings(data, cfg):
+    keys = {'MEXC':'withdraw_mexc_destination', 'Binance':'withdraw_binance_destination',
+            'Другая биржа':'withdraw_custom_destination'}
+    result = {k:cfg.get(k,v) for k,v in DEFAULTS.items()}
+    # Legacy clients may still submit a single address; never label an unknown one Binance.
+    if 'withdraw_destination' in data and 'withdraw_exchange' not in data:
+        target = destination(data['withdraw_destination'])
+        result['withdraw_exchange'] = exchange_label(target)
+        result[keys[result['withdraw_exchange']]] = target
+    selected = str(data.get('withdraw_exchange',result['withdraw_exchange']))
+    if selected not in keys:
+        raise ValueError('Выберите биржу получателя.')
+    for key in keys.values():
+        value = str(data.get(key,result[key])).strip()
+        result[key] = destination(value) if value else ''
+    if result['withdraw_binance_destination'] == MEXC_DESTINATION:
+        raise ValueError('Этот адрес принадлежит вашему депозиту MEXC. Укажите депозит Binance.')
+    target = result[keys[selected]]
+    if not target:
+        raise ValueError('Сначала укажите адрес BSC выбранной биржи.')
+    result.update(withdraw_exchange=selected,withdraw_destination=target)
+    return result
+
 PATHS = ("m/44'/60'/0'/0/0", "m/44'/60'/0'/0/1")
 GAS = 21000
 MAX_GAS_PRICE = 3_000_000_000
@@ -117,6 +163,7 @@ def make_plan(cfg, source, middle, call):
     if estimate != GAS:
         raise ValueError('Неожиданная комиссия перевода. Вывод остановлен.')
     return {'source': source, 'middle': middle, 'destination': target,
+            'exchange': cfg.get('withdraw_exchange', exchange_label(target)),
             'balance1': str(balance1), 'balance2': str(balance2),
             'nonce1': nonce1, 'nonce2': nonce2, 'gas_price': gas_price,
             'value1': str(value1), 'value2': str(value2), 'fee': str(fee),
@@ -127,6 +174,7 @@ def public(row):
     from app import bnb
     p = json.loads(row['plan'])
     result = {key: row[key] for key in ('id', 'wallet_id', 'created', 'state', 'updated', 'hash1', 'hash2', 'error')}
+    result['exchange'] = p.get('exchange', exchange_label(p['destination']))
     for key in ('source', 'middle', 'destination'):
         result[key] = p[key]
     for key in ('balance1', 'balance2', 'value1', 'value2', 'fee'):
@@ -177,6 +225,7 @@ def confirm(ident):
     plan = json.loads(row['plan'])
     cfg = settings()
     if (cfg['withdraw_destination'].lower() != plan['destination']
+            or cfg.get('withdraw_exchange',exchange_label(plan['destination'])) != plan.get('exchange',exchange_label(plan['destination']))
             or any(cfg[k] != plan[k] for k in ('sheets_enabled', 'sheets_id', 'sheets_tab'))):
         raise ValueError('Настройки изменились. Повторите расчёт.')
     pair = accounts_for(cfg, plan['source'])

@@ -29,3 +29,11 @@
 - Резервное копирование/обновление проверены с имитацией Docker/Git: остановка писателей до копии, запуск после ошибки копирования, запрет обновления без копии, возврат образа при неудаче, сохранение актуальной базы при откате, Git от пользователя при запуске через sudo.
 - `node tests/test_wallet_ui.js`: поиск без учёта регистра, фильтры, давность данных и сохранение баланса при ошибке. Синтаксис трёх изменённых JS-файлов и Python-модулей проверен.
 - Реальная VM, Google Таблица, ключи и средства при разработке не использовались. Docker-обновление и фактические сетевые запросы нужно подтвердить после установки на VM.
+
+## Binance integration — 2026-10-21
+
+- 172 offline Python tests pass, including the existing MEXC suite.
+- New tests cover Binance HMAC header/signature, market buy/sell, +0.10 USDT, actual withdrawal increment semantics, BSC-only validation, Travel Rule blocking, separate exchange state, non-replay after ambiguous purchase/withdrawal responses, and exchange-address migration.
+- Node wallet UI and Binance UI checks pass: disabled sale threshold, UTC history formatting, balance rendering, tab placement, collapsed audit markup. JS syntax and unique HTML IDs checked.
+- Full browser visual check unavailable in this environment: Chromium was absent and the download returned an invalid archive. This is not counted as a passing browser test.
+- No real API keys, trades, withdrawals, or Google Sheet changes were used. Account-specific Binance connectivity and permissions must be checked on the VM with `python3 configure_binance.py --check`.

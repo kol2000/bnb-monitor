@@ -21,6 +21,7 @@ from email_notifications import DEFAULTS as EMAIL_DEFAULTS, validate_settings, s
 from email.utils import make_msgid
 import withdrawals
 import mexc
+import binance
 import wallet_generator
 
 DATA = Path(os.environ.get('DATA_DIR', '/data'))
@@ -78,6 +79,7 @@ def init_db():
         ''')
         withdrawals.schema(c)
         mexc.schema(c)
+        binance.schema(c)
         wallet_generator.schema(c)
         c.execute('BEGIN IMMEDIATE')
         columns = {r['name'] for r in c.execute('PRAGMA table_info(wallets)')}
@@ -97,6 +99,7 @@ def init_db():
             c.execute('DROP TABLE events')
             c.execute('ALTER TABLE events_assets RENAME TO events')
             c.execute('CREATE INDEX event_delivery ON events(delivery, retry_at)')
+        withdrawals.migrate_destinations(c)
         for k, v in DEFAULTS.items():
             c.execute('INSERT OR IGNORE INTO settings VALUES (?,?)', (k, json.dumps(v)))
     os.chmod(DB, 0o600)
@@ -471,13 +474,13 @@ def save_settings():
         raise ValueError('Интервал Google: от 60 до 86400 секунд.')
     if sheets_enabled and (not sheets_id or not (DATA / 'google-service-account.json').is_file()):
         raise ValueError('Укажите таблицу и сначала установите ключ через configure_google.py на VM.')
-    withdraw_destination = withdrawals.destination(data.get('withdraw_destination', cfg['withdraw_destination']))
+    withdraw_settings = withdrawals.destination_settings(data,cfg)
     email_cfg = validate_settings(data, cfg)
     cfg.update(usdt_enabled=usdt_enabled, usdt_threshold=usdt_threshold, interval=interval, threshold=threshold, rpc_urls=urls, telegram_enabled=enabled,
                telegram_token=token, telegram_chat=chat, sheets_enabled=sheets_enabled,
                sheets_id=sheets_id, sheets_tab=sheets_tab, sheets_interval=sheets_interval)
     cfg.update(email_cfg)
-    cfg['withdraw_destination'] = withdraw_destination
+    cfg.update(withdraw_settings)
     with db() as c:
         for k, v in cfg.items():
             c.execute('UPDATE settings SET value=? WHERE key=?', (json.dumps(v), k))
@@ -518,6 +521,7 @@ def request_check():
 
 withdrawals.install(app)
 mexc.install(app)
+binance.install(app)
 wallet_generator.install(app)
 import maintenance
 maintenance.install(app)
