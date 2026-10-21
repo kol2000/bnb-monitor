@@ -252,9 +252,8 @@ def run():
         email_thread = threading.Thread(target=email_loop, name='email-delivery', daemon=True)
         email_thread.start()
         threading.Thread(target=withdrawals.run, args=(stop,), name='bnb-withdrawals', daemon=True).start()
-        import mexc, binance, maintenance
+        import binance, maintenance
         threading.Thread(target=binance.run, args=(stop,), name='binance-status', daemon=True).start()
-        threading.Thread(target=mexc.run, args=(stop,), name='mexc-status', daemon=True).start()
         threading.Thread(target=maintenance.run, args=(stop,), name='seed-audit', daemon=True).start()
         next_check = 0
         next_sync = 0

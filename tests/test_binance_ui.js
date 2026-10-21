@@ -14,7 +14,7 @@ assert($('binance-balances').innerHTML.includes('data-sell-unavailable="true"'))
 context.renderBinanceBalances({updated:2,balances:[{asset:'BNB',free:'0.1',locked:'0'}]});
 assert(!$('binance-balances').innerHTML.includes('disabled title='));
 const html=fs.readFileSync('templates/index.html','utf8');
-assert(html.indexOf('data-tab="binance"')>html.indexOf('data-tab="mexc"'));
+assert(html.includes('data-tab="binance"'));assert(!html.includes('data-tab="mexc"'));assert(!html.includes('/static/mexc.js'));
 assert(html.includes('<details class="card audit-details"><summary>'));
 assert(html.includes('id="withdraw-binance-destination"'));
 console.log('Binance UI: thresholds, balance rendering, UTC history, tab and collapsed audit OK');

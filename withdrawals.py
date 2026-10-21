@@ -37,28 +37,31 @@ def migrate_destinations(c):
         c.execute('INSERT OR IGNORE INTO settings(key,value) VALUES (?,?)', (key,json.dumps(value)))
 
 
+def activate_binance(c):
+    """Retire MEXC without reassigning its address or touching signed routes."""
+    row = c.execute("SELECT value FROM settings WHERE key='withdraw_binance_destination'").fetchone()
+    target = json.loads(row[0]) if row else ''
+    if target:
+        target = destination(target)
+        if target == MEXC_DESTINATION:
+            target = ''
+    for key,value in {'withdraw_exchange':'Binance','withdraw_destination':target,
+                      'withdraw_binance_destination':target}.items():
+        c.execute('INSERT OR REPLACE INTO settings VALUES (?,?)',(key,json.dumps(value)))
+
+
 def destination_settings(data, cfg):
-    keys = {'MEXC':'withdraw_mexc_destination', 'Binance':'withdraw_binance_destination',
-            'Другая биржа':'withdraw_custom_destination'}
-    result = {k:cfg.get(k,v) for k,v in DEFAULTS.items()}
-    # Legacy clients may still submit a single address; never label an unknown one Binance.
-    if 'withdraw_destination' in data and 'withdraw_exchange' not in data:
-        target = destination(data['withdraw_destination'])
-        result['withdraw_exchange'] = exchange_label(target)
-        result[keys[result['withdraw_exchange']]] = target
-    selected = str(data.get('withdraw_exchange',result['withdraw_exchange']))
-    if selected not in keys:
-        raise ValueError('Выберите биржу получателя.')
-    for key in keys.values():
-        value = str(data.get(key,result[key])).strip()
-        result[key] = destination(value) if value else ''
-    if result['withdraw_binance_destination'] == MEXC_DESTINATION:
-        raise ValueError('Этот адрес принадлежит вашему депозиту MEXC. Укажите депозит Binance.')
-    target = result[keys[selected]]
-    if not target:
-        raise ValueError('Сначала укажите адрес BSC выбранной биржи.')
-    result.update(withdraw_exchange=selected,withdraw_destination=target)
-    return result
+    if data.get('withdraw_exchange','Binance') != 'Binance':
+        raise ValueError('Сейчас доступна только биржа Binance.')
+    target = str(data.get('withdraw_binance_destination',cfg.get('withdraw_binance_destination',''))).strip()
+    target = destination(target) if target else ''
+    if target == MEXC_DESTINATION:
+        raise ValueError('Это прежний адрес MEXC. Укажите депозит Binance в сети BSC.')
+    if 'withdraw_destination' in data and data['withdraw_destination'] != target:
+        raise ValueError('Укажите адрес в поле депозита Binance.')
+    # Empty is allowed while saving unrelated settings; preview rejects it.
+    return {'withdraw_exchange':'Binance','withdraw_destination':target,
+            'withdraw_binance_destination':target}
 
 PATHS = ("m/44'/60'/0'/0/0", "m/44'/60'/0'/0/1")
 GAS = 21000
@@ -143,7 +146,11 @@ def idle_account(call, address):
 
 
 def make_plan(cfg, source, middle, call):
-    target = destination(cfg['withdraw_destination'])
+    if cfg.get('withdraw_exchange') != 'Binance' or not cfg.get('withdraw_binance_destination'):
+        raise ValueError('Сначала сохраните депозитный адрес Binance в настройках.')
+    target = destination(cfg['withdraw_binance_destination'])
+    if target == MEXC_DESTINATION or target != cfg.get('withdraw_destination'):
+        raise ValueError('Проверьте депозитный адрес Binance. Перевод остановлен.')
     if len({source, middle, target}) != 3:
         raise ValueError('Первый, второй и биржевой адреса должны различаться.')
     if call('eth_getCode', [target, 'latest']) != '0x':

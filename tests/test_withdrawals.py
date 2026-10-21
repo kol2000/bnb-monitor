@@ -18,7 +18,7 @@ Account.enable_unaudited_hdwallet_features()
 MNEMONIC = 'test test test test test test test test test test test junk'
 PAIR = tuple(Account.from_mnemonic(MNEMONIC, account_path=p) for p in wd.PATHS)
 SOURCE, MIDDLE = (a.address.lower() for a in PAIR)
-TARGET = wd.DEFAULTS['withdraw_destination']
+TARGET = '0x'+'2'*40
 
 
 class FakeRPC:
@@ -59,7 +59,7 @@ class WithdrawTests(unittest.TestCase):
             c.execute('DELETE FROM withdrawals')
             c.execute('DELETE FROM wallets')
             self.wid = c.execute('INSERT INTO wallets(address,name,balance) VALUES (?,?,?)', (SOURCE, 'Test', str(10**17))).lastrowid
-            for k, v in {'sheets_enabled': True, 'sheets_id': 'test-sheet', 'sheets_tab': 'bnb кошельки', 'withdraw_destination': TARGET}.items():
+            for k, v in {'sheets_enabled': True, 'sheets_id': 'test-sheet', 'sheets_tab': 'bnb кошельки', 'withdraw_destination': TARGET, 'withdraw_exchange':'Binance', 'withdraw_binance_destination':TARGET}.items():
                 c.execute('INSERT OR REPLACE INTO settings VALUES (?,?)', (k, json.dumps(v)))
         self.patches = [patch('withdrawals.accounts_for', return_value=PAIR), patch('app.rpc', side_effect=lambda u,m,p:self.rpc(m,p))]
         for p in self.patches: p.start()

@@ -100,6 +100,7 @@ def init_db():
             c.execute('ALTER TABLE events_assets RENAME TO events')
             c.execute('CREATE INDEX event_delivery ON events(delivery, retry_at)')
         withdrawals.migrate_destinations(c)
+        withdrawals.activate_binance(c)
         for k, v in DEFAULTS.items():
             c.execute('INSERT OR IGNORE INTO settings VALUES (?,?)', (k, json.dumps(v)))
     os.chmod(DB, 0o600)
@@ -520,7 +521,6 @@ def request_check():
 
 
 withdrawals.install(app)
-mexc.install(app)
 binance.install(app)
 wallet_generator.install(app)
 import maintenance

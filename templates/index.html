@@ -5,12 +5,10 @@
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=1">
   <title>BNB Monitor — кошельки</title><link rel="stylesheet" href="/static/style.css"><link rel="stylesheet" href="/static/google.css">
   <script src="/static/app.js" defer></script>
-  <script src="/static/mexc.js" defer></script>
   <script src="/static/binance.js" defer></script>
   <link rel="stylesheet" href="/static/binance.css">
   <script src="/static/generator.js" defer></script>
   <script src="/static/maintenance.js" defer></script>
-  <link rel="stylesheet" href="/static/mexc.css">
 </head>
 <body>
 <header><div class="brand"><span class="logo">B</span><div>BNB Monitor<small>Личный мониторинг кошельков</small></div></div><div class="header-right"><select id="theme-select" class="theme-select" aria-label="Тема оформления"><option value="dark">☾ Тёмная</option><option value="light">☀ Светлая</option></select><span class="network">● BSC MAINNET · 56</span><button id="logout" class="quiet" hidden>Выйти</button></div></header>
@@ -22,7 +20,7 @@
     <p class="small"><a href="https://coinmarketcap.com/currencies/bnb/" target="_blank" rel="noopener noreferrer">Курс BNB · CoinMarketCap ↗</a> · <span id="price-status">Ожидаем курс</span></p>
     <div id="rpc-error" class="warning" hidden></div>
     <p class="notice">ⓘ Отслеживаем <strong>изменение баланса</strong>, не каждую транзакцию. Поступление и списание между проверками могут взаимно скрыться. Первый баланс — точка отсчёта, без уведомления.</p>
-    <nav class="tabs"><button class="tab active" data-tab="wallets">Кошельки</button><button class="tab" data-tab="mexc">Биржа MEXC</button><button class="tab" data-tab="binance">Биржа Binance</button><button class="tab" data-tab="generator">Генератор кошельков</button><button class="tab" data-tab="history">История изменений</button><button class="tab" data-tab="withdrawals">Переводы</button><button class="tab" data-tab="settings">Настройки</button></nav>
+    <nav class="tabs"><button class="tab active" data-tab="wallets">Кошельки</button><button class="tab" data-tab="binance">Биржа Binance</button><button class="tab" data-tab="generator">Генератор кошельков</button><button class="tab" data-tab="history">История изменений</button><button class="tab" data-tab="withdrawals">Переводы</button><button class="tab" data-tab="settings">Настройки</button></nav>
     <section id="tab-wallets">
       <div class="card add-card"><div><h2>Добавить кошельки</h2><p class="muted small">Один адрес на строку. Можно добавить название через пробел.</p></div><form id="wallet-form"><textarea id="addresses" rows="3" placeholder="0x… Основной кошелёк&#10;0x… Резервный" required spellcheck="false"></textarea><button type="submit">+ Добавить адреса</button></form></div>
       <div class="settings-grid"><label>Поиск по имени или адресу<input id="wallet-search" type="search" placeholder="Email или 0x…"></label><label>Показать<select id="wallet-filter"><option value="all">Все кошельки</option><option value="bnb">С балансом BNB</option><option value="usdt">С балансом USDT</option><option value="unnamed">Без имени</option><option value="error">С ошибками проверки</option></select></label></div>
@@ -51,14 +49,9 @@
       <div class="card"><div class="section-heading"><h2>Последние партии</h2><button id="generator-refresh" class="secondary" type="button">Обновить журнал</button></div><div id="generator-items"></div></div>
     </section>
     <section id="tab-history" hidden><div class="section-heading"><h2>Последние 200 изменений</h2><p class="muted small">Время отображается в часовом поясе вашего браузера.</p></div><div class="table-wrap card"><table><thead><tr><th>Время / кошелёк</th><th>Изменение / актив</th><th>Новый баланс</th><th>Блок</th><th>Уведомление</th></tr></thead><tbody id="event-list"></tbody></table><div id="event-empty" class="empty">Изменений пока нет. Начальный баланс в историю не записывается.</div></div></section>
-    <section id="tab-mexc" hidden>
-      <div class="card"><div class="section-heading"><h2>Спотовый аккаунт MEXC</h2><button id="mexc-refresh" class="secondary" type="button">Проверить баланс и выводы</button></div><p id="mexc-balances">Нажмите «Проверить баланс и выводы», чтобы загрузить данные биржи и сети.</p><small id="mexc-updated">Ключи хранятся только на сервере.</small></div>
-      <div class="settings-grid"><form class="card" id="mexc-buy-form"><h2>Купить BNB → вывести на кошелёк</h2><label>Сумма USDT<input id="mexc-amount" type="number" min="0.01" step="0.01" required placeholder="50.00"></label><p class="muted small">К сумме ордера добавляется 0,10 USDT: 50 → 50,10. Торговая комиссия и комиссия вывода рассчитываются биржей отдельно.</p><label>Сеть получателя<select id="mexc-network" required><option value="">Сначала загрузите сети</option></select></label><label>Адрес кошелька<input id="mexc-address" required placeholder="0x…" autocomplete="off"></label><label>Memo / тег (если требуется получателю)<input id="mexc-memo" maxlength="128" autocomplete="off"></label><button type="submit">Рассчитать покупку</button></form>
-      <div class="card"><h2>Покупка и вывод</h2><p>Статус покупки обновляется автоматически. После исполнения нажмите «Рассчитать вывод BNB». Перед отправкой вы увидите сумму, адрес, сеть и комиссию.</p><p class="muted">Выводится только BNB этой покупки с резервом на комиссию. При неопределённом ответе повторная отправка блокируется до сверки с биржей.</p><h2>Операции приложения</h2><p id="mexc-auto" class="muted small"></p><div id="mexc-jobs"></div></div></div>
-      <div class="card"><h2>Выводы BNB с MEXC за 7 дней</h2><p class="muted small">Включая выводы, созданные вне приложения. Данные обновляются кнопкой проверки баланса.</p><div class="table-wrap"><table><thead><tr><th>Время</th><th>Сумма</th><th>Получатель / сеть</th><th>Статус / транзакция</th></tr></thead><tbody id="mexc-history"></tbody></table></div></div>
-    </section>
+
     <section id="tab-binance" hidden>
-      <p class="muted small">Отдельный аккаунт и журнал Binance. Вывод BNB поддерживается в сети BSC. Ключи устанавливаются командой python3 configure_binance.py на VM.</p>
+      <p class="muted small">Спотовый аккаунт и журнал Binance. Вывод BNB поддерживается в сети BSC. Ключи устанавливаются командой python3 configure_binance.py на VM.</p>
       <div class="card"><div class="section-heading"><h2>Спотовый аккаунт Binance</h2><button id="binance-refresh" class="secondary" type="button">Проверить баланс и выводы</button></div><p id="binance-balances">Нажмите «Проверить баланс и выводы», чтобы загрузить данные биржи и сети.</p><small id="binance-updated">Ключи хранятся только на сервере.</small></div>
       <div class="settings-grid"><form class="card" id="binance-buy-form"><h2>Купить BNB → вывести на кошелёк</h2><label>Сумма USDT<input id="binance-amount" type="number" min="0.01" step="0.01" required placeholder="50.00"></label><p class="muted small">К сумме ордера добавляется 0,10 USDT: 50 → 50,10. Торговая комиссия и комиссия вывода рассчитываются биржей отдельно.</p><label>Сеть получателя<select id="binance-network" required><option value="">Сначала загрузите сети</option></select></label><label>Адрес кошелька<input id="binance-address" required placeholder="0x…" autocomplete="off"></label><label>Memo / тег (если требуется получателю)<input id="binance-memo" maxlength="128" autocomplete="off"></label><button type="submit">Рассчитать покупку</button></form>
       <div class="card"><h2>Покупка и вывод</h2><p>Статус покупки обновляется автоматически. После исполнения нажмите «Рассчитать вывод BNB». Перед отправкой вы увидите сумму, адрес, сеть и комиссию.</p><p class="muted">Выводится только BNB этой покупки с резервом на комиссию. При неопределённом ответе повторная отправка блокируется до сверки с биржей.</p><h2>Операции приложения</h2><p id="binance-auto" class="muted small"></p><div id="binance-jobs"></div></div></div>
@@ -77,11 +70,8 @@
       <details class="card audit-details"><summary>Проверка адресов и сид-фраз</summary><p>VM сверит адрес в B с первым аккаунтом сид-фразы из C. Сид-фразы и приватные ключи не возвращаются в браузер. Проверка не отправляет транзакций.</p><button id="audit-start" type="button">Проверить соответствие</button><p id="audit-status" role="status"></p><div id="audit-results"></div></details>
       <form id="withdrawal-form" class="card">
         <h2>Вывод BNB на биржу</h2>
-        <label>Биржа получателя для новых переводов<select id="withdraw-exchange"><option>MEXC</option><option>Binance</option><option>Другая биржа</option></select></label>
-        <label>Депозит MEXC · BSC<input id="withdraw-mexc-destination" spellcheck="false" pattern="0x[0-9a-fA-F]{40}"></label>
-        <p class="muted small">MEXC прекращает обслуживание вашего аккаунта. Перед переводом проверьте доступность депозита.</p>
+        <p>Биржа получателя: <strong>Binance</strong> · сеть BSC</p>
         <label>Депозит Binance · BSC<input id="withdraw-binance-destination" spellcheck="false" placeholder="Укажите адрес депозита BNB в сети BSC на Binance" pattern="0x[0-9a-fA-F]{40}"></label>
-        <label>Другая биржа · BSC<input id="withdraw-custom-destination" spellcheck="false" pattern="0x[0-9a-fA-F]{40}"></label>
         <p class="muted small">По кнопке «Вывести»: первый аккаунт → второй аккаунт той же сид-фразы → биржа. Сид-фраза берётся из C соответствующей строки Google, адрес — из B. Используются стандартные аккаунты MetaMask 1 и 2. Суммы и комиссии показываются перед подтверждением. Адрес биржи фиксируется для каждого подтверждённого вывода; изменение настройки действует на новые выводы.</p>
         <p class="muted small">Переводится только BNB, включая уже имеющийся BNB второго аккаунта. USDT остаётся на месте; для его будущего перевода снова понадобится BNB на комиссию. Проверьте минимальный депозит BNB и сеть BSC на бирже.</p>
         <button type="submit">Сохранить адрес биржи</button>
