@@ -43,6 +43,19 @@ class EmailTests(unittest.TestCase):
         self.assertEqual(self.email_row()['delivery'], 'sent')
         self.assertEqual(self.base.events()[0]['delivery'], 'off')
 
+    def test_digest_option_never_redirects_email_fallback_to_telegram(self):
+        self.queue(telegram=True)
+        self.post('settings', {'telegram_digest': True})
+        cfg = mod.settings()
+        for i in range(2, 5):
+            mod.record_balance(self.wid, i * 10**18, 100+i, cfg)
+        with mod.db() as c:
+            c.execute('UPDATE events SET created=0,attempts=3,retry_at=0')
+        with patch('worker.telegram') as tg, patch('worker.send_email') as send, patch.object(worker.stop, 'wait'):
+            worker.deliver_email()
+        tg.assert_not_called()
+        self.assertEqual(send.call_count, 4)
+
     def test_fallback_only_after_three_failures(self):
         self.queue(telegram=True)
         with patch('worker.telegram', side_effect=mod.RemoteError('offline')), patch.object(worker.stop, 'wait'), patch('worker.send_email') as send:
@@ -151,4 +164,3 @@ class EmailTests(unittest.TestCase):
         with patch('email_notifications.smtplib.SMTP',side_effect=smtplib.SMTPAuthenticationError(535,b'secret')):
             with self.assertRaises(EmailError) as err: send_email(cfg,'test')
         self.assertNotIn('secret',str(err.exception))
-

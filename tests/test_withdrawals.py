@@ -220,7 +220,7 @@ class SeedMappingTests(unittest.TestCase):
             self.assertIn('B1%3AB5000', req.call_args_list[0].args[2])
             self.assertIn('B2%3AC2', req.call_args_list[1].args[2])
             req.side_effect = [{'values': [[MIDDLE]]}, {'values': [[MIDDLE, MNEMONIC]]}]
-            with self.assertRaisesRegex(ValueError, 'не совпадает'): wd.accounts_for(cfg, MIDDLE)
+            self.assertEqual(wd.accounts_for(cfg, MIDDLE)[1].address.lower(), MIDDLE)
 
     def test_bad_seed_is_redacted(self):
         with patch('sheets_sync.google_credentials'), patch('sheets_sync.export_request') as req:

@@ -82,6 +82,13 @@ def backup():
         (folder/file).chmod(0o600)
     (folder/'image.json').write_text(json.dumps({'services':{
         s:{'image':tag,'pull_policy':'never'} for s in ('web','worker')}}))
+    key = ROOT / 'backup-encryption.key'
+    if not key.exists():
+        with key.open('xb') as stream:
+            stream.write(os.urandom(32))
+        key.chmod(0o600)
+    if key.is_symlink() or len(key.read_bytes()) != 32 or key.stat().st_mode & 0o077:
+        raise RuntimeError('Проверьте backup-encryption.key: 32 байта, права 600.')
     stopped = False
     try:
         stopped = True
@@ -91,15 +98,22 @@ def backup():
              '--mount',f'type=bind,src={folder},dst=/backup',image,'-c',
              "import os,tarfile; os.umask(0o077); "
              "t=tarfile.open('/backup/data.tar.gz','w:gz'); t.add('/source',arcname='data'); t.close()"])
-        digest = checksum(folder/'data.tar.gz')
+        run(['docker','run','--rm','--user','0','--network','none','--entrypoint','python',
+             '--mount',f'type=bind,src={key},dst=/backup-encryption.key,readonly',
+             '--mount',f'type=bind,src={ROOT / "backup_crypto.py"},dst=/backup_crypto.py,readonly',
+             '--mount',f'type=bind,src={folder},dst=/backup', image,
+             '/backup_crypto.py','encrypt','/backup-encryption.key','/backup'])
+        digest = checksum(folder/'data.tar.gz.enc')
         manifest = {'created':time.time(),'commit':run(['git','rev-parse','HEAD'],True).strip(),
-                    'image':image,'tag':tag,'volume':volume,'sha256':digest}
+                    'image':image,'tag':tag,'volume':volume,'sha256':digest,
+                    'encrypted':True, 'env_sha256':checksum(folder/'.env.enc')}
         (folder/'manifest.json').write_text(json.dumps(manifest,indent=2))
         (folder/'manifest.json').chmod(0o600)
     finally:
         if stopped and running:
             compose('start',*running)
-    print('Резервная копия:',folder)
+    print('Зашифрованная резервная копия:',folder)
+    print('Сохраните backup-encryption.key отдельно: без него восстановить данные нельзя.')
     return folder
 
 
@@ -109,10 +123,10 @@ def rollback(folder):
     if folder.parent != BACKUPS.resolve():
         raise RuntimeError('Укажите каталог резервной копии внутри backups/.')
     manifest = json.loads((folder/'manifest.json').read_text())
-    if checksum(folder/'data.tar.gz')!=manifest['sha256']:
+    if checksum(folder/('data.tar.gz.enc' if manifest.get('encrypted') else 'data.tar.gz'))!=manifest['sha256']:
         raise RuntimeError('Контрольная сумма резервной копии не совпала.')
     run(['docker','image','inspect',manifest['tag']],True)
-    files = ('-f',str(folder/'compose.yaml'),'-f',str(folder/'image.json'))
+    files = ('--env-file',str(ROOT/'.env'),'-f',str(folder/'compose.yaml'),'-f',str(folder/'image.json'))
     run(['docker','compose',*files,'up','-d','--no-build'])
     wait_healthy(files)
     print('Запущен прежний образ. Актуальная база и журналы операций сохранены.')

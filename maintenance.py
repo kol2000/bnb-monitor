@@ -39,6 +39,20 @@ def addresses(rows):
     return sorted(found)
 
 
+def named_rows(rows):
+    present = addresses(rows)
+    result = {}
+    for row in rows:
+        if len(row) > 1 and str(row[1]).strip().lower() in present:
+            address = str(row[1]).strip().lower()
+            name = str(row[0]).strip()[:80] or address[:8]
+            if address in result and result[address] != name:
+                from app import RemoteError
+                raise RemoteError('У адреса несколько разных имён. Исправьте дубликаты.')
+            result[address] = name
+    return result
+
+
 def snapshot(c):
     return [dict(r) for r in c.execute('SELECT id,address,name FROM wallets ORDER BY id')]
 
@@ -49,14 +63,17 @@ def preview():
     cfg = settings()
     if not cfg['sheets_enabled']:
         raise RemoteError('Сначала включите и сохраните Google Таблицу.')
-    present = addresses(fetch_rows(cfg))
+    names = named_rows(fetch_rows(cfg))
+    present = sorted(names)
     with db() as c:
         wallets = snapshot(c)
         p = dict(token=secrets.token_hex(24), created=time.time(), source=source(cfg),
-                 addresses=present, wallets=wallets,
+                 addresses=present, names=names, wallets=wallets,
+                 added=[dict(address=a, name=n) for a,n in names.items() if a not in {w['address'] for w in wallets}],
+                 renamed=[dict(w, new_name=names[w['address']]) for w in wallets if w['address'] in names and w['name'] != names[w['address']]],
                  removed=[w for w in wallets if w['address'].lower() not in present])
         put(c, 'reconcile_preview', p)
-    return {'token':p['token'], 'removed':p['removed'], 'count':len(present), 'expires':p['created']+300}
+    return {'token':p['token'], 'removed':p['removed'], 'added':p['added'], 'renamed':p['renamed'], 'count':len(present), 'expires':p['created']+300}
 
 
 def confirm(token):
@@ -67,7 +84,7 @@ def confirm(token):
     if not p or not isinstance(token, str) or not secrets.compare_digest(p['token'], token) or time.time()-p['created']>300:
         raise RemoteError('Предпросмотр истёк. Выполните сверку заново.')
     cfg = settings()
-    if source(cfg) != p['source'] or addresses(fetch_rows(cfg)) != p['addresses']:
+    if source(cfg) != p['source'] or named_rows(fetch_rows(cfg)) != p['names']:
         raise RemoteError('Таблица или настройки изменились. Выполните предпросмотр заново.')
     with db() as c:
         c.execute('BEGIN IMMEDIATE')
@@ -81,10 +98,17 @@ def confirm(token):
             c.execute("UPDATE events SET delivery='cancelled' WHERE wallet_id=? AND delivery='pending'", (w['id'],))
             c.execute("UPDATE email_outbox SET delivery='cancelled' WHERE delivery='pending' AND event_id IN (SELECT id FROM events WHERE wallet_id=?)", (w['id'],))
             c.execute('DELETE FROM wallets WHERE id=?', (w['id'],))
+        if len(p['names']) > 500:
+            raise RemoteError('Лимит — 500 кошельков.')
+        for w in p['added']:
+            c.execute('INSERT INTO wallets(address,name) VALUES (?,?)', (w['address'], w['name']))
+        for w in p['renamed']:
+            c.execute('UPDATE wallets SET name=? WHERE id=?', (w['new_name'], w['id']))
+        put(c, 'check_requested', True)
         put(c, 'sheets_reconciled_at', time.time())
         put(c, 'sheets_removed', len(p['removed']))
         c.execute("DELETE FROM status WHERE key='reconcile_preview'")
-    return {'removed':len(p['removed'])}
+    return {'removed':len(p['removed']), 'added':len(p['added']), 'renamed':len(p['renamed'])}
 
 
 def start_audit():
@@ -123,8 +147,12 @@ def audit_once():
         w = a['wallets'][len(a['results'])]
         result = 'Адрес соответствует сид-фразе'
         ok = True
+        account_number, related = None, None
         try:
             pair = accounts_for(cfg, w['address'])
+            account_number = 1 if pair[0].address.lower() == w['address'].lower() else 2
+            related = pair[1 if account_number == 1 else 0].address.lower()
+            result = f'Аккаунт {account_number}: адрес соответствует сид-фразе'
             del pair
         except ValueError:
             ok, result = False, 'Не совпадает адрес либо отсутствует единственная корректная строка B:C'
@@ -132,7 +160,7 @@ def audit_once():
             # Never persist an exception string: mnemonic libraries may include words.
             ok, result = False, 'Проверка не завершена: проверьте доступ к Google и корректность сид-фразы'
         a['results'].append(dict(address=w['address'], name=w['name'], ok=ok,
-                                 result=result, checked=time.time(), path="m/44'/60'/0'/0/0"))
+                                 result=result, checked=time.time(), account_number=account_number, related=related))
         if len(a['results']) == len(a['wallets']):
             a['state'] = 'done'
     a['updated'] = time.time()

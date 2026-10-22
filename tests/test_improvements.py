@@ -68,7 +68,7 @@ class ReconciliationTests(unittest.TestCase):
         self.assertNotIn('FAKE_SECRET_WORDS',json.dumps(self.client.get('/api/state').json))
     def test_audit_success_and_source_change(self):
         mt.start_audit()
-        with patch('withdrawals.accounts_for',return_value=(object(),object())) as call:
+        with patch('withdrawals.accounts_for',return_value=(type('A',(),{'address':base.A})(),type('B',(),{'address':base.B})())) as call:
             mt.audit_once();call.assert_called_once()
         self.assertTrue(self.client.get('/api/seed-audit').json['results'][0]['ok'])
         mt.start_audit()

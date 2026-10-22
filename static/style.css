@@ -39,3 +39,7 @@
 .wallet-actions{grid-template-columns:max-content}
 
 .audit-details>summary{cursor:pointer;font-weight:700;font-size:1.15rem}.audit-details[open]>summary{margin-bottom:16px}
+
+dialog#wallet-detail{width:min(760px,90vw);max-height:85vh;overflow:auto;background:var(--bg,#151c24);color:var(--text,#e7edf5);border:1px solid #485563;border-radius:16px;padding:24px}dialog::backdrop{background:#0009}#wallet-detail .mono{overflow-wrap:anywhere}
+
+#wallet-detail .mono{white-space:normal} .name [data-detail]{color:inherit;font:inherit;padding-left:0;text-align:left}

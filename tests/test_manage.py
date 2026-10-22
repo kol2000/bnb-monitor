@@ -21,13 +21,20 @@ class DeploymentTests(unittest.TestCase):
             return 'web\nworker\n' if '--services' in args else 'cid\n'
         if args[:3]==['git','rev-parse','HEAD']:return 'abc\n'
         if args[:2]==['docker','run']:
-            mount=next(x for x in args if x.startswith('type=bind,src='))
-            folder=Path(mount.split('src=')[1].split(',dst=')[0]);(folder/'data.tar.gz').write_bytes(b'archive')
+            mount=next(x for x in args if x.startswith('type=bind,src=') and x.endswith('dst=/backup'))
+            folder=Path(mount.split('src=')[1].split(',dst=')[0])
+            if 'encrypt' in args:
+                from backup_crypto import transform
+                for name in ('data.tar.gz','.env'):
+                    transform(folder/name,folder/(name+'.enc'),self.root/'backup-encryption.key')
+                    (folder/name).unlink()
+            else:
+                (folder/'data.tar.gz').write_bytes(b'archive')
         return ''
     def test_backup_stops_writers_and_saves_image(self):
         with patch.object(manage,'run',side_effect=self.fake):folder=manage.backup()
         self.assertTrue((folder/'manifest.json').exists())
-        self.assertEqual((folder/'.env').stat().st_mode&0o777,0o600)
+        self.assertEqual((folder/'.env.enc').stat().st_mode&0o777,0o600)
         stop=self.commands.index(['docker','compose','stop','web','worker'])
         tar=next(i for i,c in enumerate(self.commands) if c[:2]==['docker','run'])
         restart=self.commands.index(['docker','compose','start','web','worker'])

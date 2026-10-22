@@ -88,7 +88,7 @@ def destination(value):
     return value
 
 
-def accounts_for(cfg, address):
+def accounts_for(cfg, address, allow_related=True):
     """Read B for row lookup, then only that row's B:C. No bulk seed download."""
     from app import RemoteError
     from sheets_sync import google_credentials, export_request
@@ -105,9 +105,24 @@ def accounts_for(cfg, address):
         raise ValueError('Нужна ровно одна строка с этим адресом в столбце B.')
     row = matches[0]
     values = read(f'B{row}:C{row}')
-    if (len(values) != 1 or len(values[0]) != 2
-            or str(values[0][0]).strip().lower() != address):
-        raise ValueError('Строка Google изменилась или в C отсутствует сид-фраза. Повторите расчёт.')
+    if len(values) != 1 or not values[0] or str(values[0][0]).strip().lower() != address:
+        raise ValueError('Строка Google изменилась. Повторите расчёт.')
+    if len(values[0]) < 2 or not str(values[0][1]).strip():
+        # A public audit relationship is only a lookup hint. Re-derive and verify
+        # both addresses from the current source row before using any key.
+        if allow_related:
+            from app import db
+            with db() as c:
+                r = c.execute("SELECT value FROM status WHERE key='seed_audit'").fetchone()
+            audit = json.loads(r['value']) if r else {}
+            same_source = audit.get('source') == {k:cfg[k] for k in ('sheets_enabled','sheets_id','sheets_tab')}
+            candidates = [r['address'] for r in audit.get('results', []) if r.get('ok')
+                          and r.get('account_number') == 1 and r.get('related') == address] if same_source else []
+            if len(set(candidates)) == 1:
+                pair = accounts_for(cfg, candidates[0], allow_related=False)
+                if pair[0].address.lower() == candidates[0] and pair[1].address.lower() == address:
+                    return pair
+        raise ValueError('Нет сид-фразы или проверенной связи с аккаунтом 1. Запустите проверку адресов в настройках.')
     try:
         Account.enable_unaudited_hdwallet_features()
         mnemonic = ' '.join(str(values[0][1]).split())
@@ -117,8 +132,8 @@ def accounts_for(cfg, address):
         raise RemoteError('Сид-фраза в столбце C не прошла проверку.') from None
     finally:
         values.clear()
-    if pair[0].address.lower() != address:
-        raise ValueError('Адрес из B не совпадает с первым аккаунтом сид-фразы. Вывод остановлен.')
+    if address not in [a.address.lower() for a in pair]:
+        raise ValueError('Адрес из B не совпадает с аккаунтом 1 или 2 сид-фразы. Вывод остановлен.')
     return pair
 
 
@@ -145,31 +160,31 @@ def idle_account(call, address):
     return balance, latest
 
 
-def make_plan(cfg, source, middle, call):
+def make_plan(cfg, source, middle, call, direct=False):
     if cfg.get('withdraw_exchange') != 'Binance' or not cfg.get('withdraw_binance_destination'):
         raise ValueError('Сначала сохраните депозитный адрес Binance в настройках.')
     target = destination(cfg['withdraw_binance_destination'])
     if target == MEXC_DESTINATION or target != cfg.get('withdraw_destination'):
         raise ValueError('Проверьте депозитный адрес Binance. Перевод остановлен.')
-    if len({source, middle, target}) != 3:
+    if source == target or (not direct and len({source, middle, target}) != 3):
         raise ValueError('Первый, второй и биржевой адреса должны различаться.')
     if call('eth_getCode', [target, 'latest']) != '0x':
         raise ValueError('Биржевой адрес содержит код контракта. Такой вывод не поддерживается.')
     balance1, nonce1 = idle_account(call, source)
-    balance2, nonce2 = idle_account(call, middle)
+    balance2, nonce2 = (0, 0) if direct else idle_account(call, middle)
     gas_price = int(call('eth_gasPrice', []), 16)
     if not 0 < gas_price <= MAX_GAS_PRICE:
         raise ValueError('Цена газа вне допустимого диапазона (до 3 Gwei). Попробуйте позже.')
     fee = GAS * gas_price
     value1 = balance1 - fee
-    value2 = balance2 + value1 - fee
+    value2 = value1 if direct else balance2 + value1 - fee
     if value1 <= 0 or value2 <= 0:
         raise ValueError('Недостаточно BNB для двух переводов с комиссиями.')
-    estimate = int(call('eth_estimateGas', [{'from': source, 'to': middle,
+    estimate = int(call('eth_estimateGas', [{'from': source, 'to': target if direct else middle,
                    'value': hex(value1), 'gasPrice': hex(gas_price)}]), 16)
     if estimate != GAS:
         raise ValueError('Неожиданная комиссия перевода. Вывод остановлен.')
-    return {'source': source, 'middle': middle, 'destination': target,
+    return {'source': source, 'middle': middle, 'destination': target, 'legs': 1 if direct else 2,
             'exchange': cfg.get('withdraw_exchange', exchange_label(target)),
             'balance1': str(balance1), 'balance2': str(balance2),
             'nonce1': nonce1, 'nonce2': nonce2, 'gas_price': gas_price,
@@ -181,6 +196,7 @@ def public(row):
     from app import bnb
     p = json.loads(row['plan'])
     result = {key: row[key] for key in ('id', 'wallet_id', 'created', 'state', 'updated', 'hash1', 'hash2', 'error')}
+    result['legs'] = p.get('legs', 2)
     result['exchange'] = p.get('exchange', exchange_label(p['destination']))
     for key in ('source', 'middle', 'destination'):
         result[key] = p[key]
@@ -203,7 +219,8 @@ def preview(wid):
     last_error = None
     for url in cfg['rpc_urls']:
         try:
-            plan = make_plan(cfg, pair[0].address.lower(), pair[1].address.lower(), node(url))
+            direct = wallet['address'].lower() == pair[1].address.lower()
+            plan = make_plan(cfg, wallet['address'].lower(), pair[1].address.lower(), node(url), direct=direct)
             plan['url'] = url
             break
         except RemoteError as exc:
@@ -240,15 +257,18 @@ def confirm(ident):
         raise ValueError('Второй аккаунт изменился. Вывод остановлен.')
     call = node(plan['url'])
     # Recompute with the same agreed gas price; a changed balance/nonce cancels.
-    fresh = make_plan(cfg, plan['source'], plan['middle'], call)
+    direct = plan.get('legs', 2) == 1
+    if direct and pair[1].address.lower() != plan['source']:
+        raise ValueError('Аккаунт источника изменился.')
+    fresh = make_plan(cfg, plan['source'], plan['middle'], call, direct=direct)
     for key in ('balance1', 'balance2', 'nonce1', 'nonce2', 'gas_price'):
         if fresh[key] != plan[key]:
             raise ValueError('Баланс, nonce или комиссия изменились. Повторите расчёт.')
     signed = []
-    for i, account in enumerate(pair, 1):
+    for i, account in enumerate((pair[1],) if direct else pair, 1):
         tx = {'chainId': 56, 'nonce': plan[f'nonce{i}'], 'gas': GAS,
               'gasPrice': plan['gas_price'], 'value': int(plan[f'value{i}']),
-              'to': to_checksum_address(plan['middle'] if i == 1 else plan['destination'])}
+              'to': to_checksum_address(plan['middle'] if i == 1 and not direct else plan['destination'])}
         signed.append(account.sign_transaction(tx))
     # Atomic reservation, followed by durable signed bytes. No RPC sends in web.
     with db() as c:
@@ -259,8 +279,8 @@ def confirm(ident):
         if c.execute("SELECT 1 FROM withdrawals WHERE state IN ('pending1','pending2','blocked')").fetchone():
             raise ValueError('Другой вывод уже запущен.')
         c.execute("""UPDATE withdrawals SET state='pending1',raw1=?,raw2=?,hash1=?,hash2=?,updated=?
-                     WHERE id=?""", ('0x'+signed[0].raw_transaction.hex(), '0x'+signed[1].raw_transaction.hex(),
-                     '0x'+signed[0].hash.hex(), '0x'+signed[1].hash.hex(), time.time(), ident))
+                     WHERE id=?""", ('0x'+signed[0].raw_transaction.hex(), ('0x'+signed[1].raw_transaction.hex()) if len(signed)>1 else None,
+                     '0x'+signed[0].hash.hex(), ('0x'+signed[1].hash.hex()) if len(signed)>1 else None, time.time(), ident))
         current = c.execute('SELECT * FROM withdrawals WHERE id=?', (ident,)).fetchone()
     return public(current)
 
@@ -309,12 +329,12 @@ def tick():
             if int(receipt['status'], 16) != 1:
                 update(ident, state='failed', error=f'Перевод {leg} отклонён сетью. Проверьте транзакцию по хешу.')
                 return
-            update(ident, state='pending2' if leg == 1 else 'done', error=None)
+            update(ident, state='pending2' if leg == 1 and plan.get('legs', 2) == 2 else 'done', error=None)
             set_status(check_requested=True)
             return
         # Absence of a receipt is NOT proof of failure. Re-use the same signed tx.
         source = plan['source'] if leg == 1 else plan['middle']
-        target = plan['middle'] if leg == 1 else plan['destination']
+        target = plan['middle'] if leg == 1 and plan.get('legs', 2) == 2 else plan['destination']
         nonce = plan[f'nonce{leg}']
         latest_nonce = int(call('eth_getTransactionCount', [source, 'latest']), 16)
         if latest_nonce > nonce:

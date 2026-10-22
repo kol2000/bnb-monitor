@@ -31,7 +31,7 @@ DEFAULTS = {'interval': 30, 'threshold': '0.00000001', 'telegram_enabled': False
             'telegram_token': '', 'telegram_chat': '',
             'rpc_urls': ['https://bsc-dataseed-public.bnbchain.org'],
             'sheets_enabled': False, 'sheets_id': '', 'sheets_tab': 'Кошельки',
-            'sheets_interval': 300, 'usdt_enabled': True, 'usdt_threshold': '0.01'}
+            'telegram_digest': False, 'sheets_interval': 300, 'usdt_enabled': True, 'usdt_threshold': '0.01'}
 
 USDT_CONTRACT = '0x55d398326f99059ff775485246999027b3197955'
 ASSET_FIELDS = {'BNB': ('balance', 'block', 'checked', 'error'),
@@ -310,7 +310,22 @@ def state():
     price = status.get('bnb_usd')
     price_at = status.get('price_at')
     price_stale = not price_at or time.time() - price_at > 900
+    fresh_after = max(180, cfg['interval'] * 2 + status.get('last_cycle_duration', 0))
+    audit = status.get('seed_audit', {})
+    same_source = audit.get('source') == {k:cfg[k] for k in ('sheets_enabled','sheets_id','sheets_tab')}
+    audited = {r['address']: r for r in audit.get('results', []) if r.get('ok')} if same_source else {}
+    for a in list(audited.values()):
+        if a.get('account_number') == 1 and a.get('related'):
+            audited.setdefault(a['related'], {'account_number':2, 'related':a['address']})
+    health = {'fresh': 0, 'stale': 0, 'errors': 0, 'unchecked': 0}
     for w in wallets:
+        a = audited.get(w['address'], {})
+        w['account_number'], w['related_address'] = a.get('account_number'), a.get('related')
+        stamps = [w['checked']] + ([w['usdt_checked']] if cfg['usdt_enabled'] else [])
+        w['stale'] = any(not t or time.time()-t > fresh_after for t in stamps)
+        health['unchecked'] += any(not t for t in stamps)
+        health['errors'] += bool(w['error'] or (cfg['usdt_enabled'] and w['usdt_error']))
+        health['stale' if w['stale'] else 'fresh'] += 1
         w['bnb'] = bnb(w['balance']) if w['balance'] is not None else None
         w['usd'] = usd(w['balance'], price)
         w['usdt'] = bnb(w['usdt_balance']) if w['usdt_balance'] is not None else None
@@ -318,10 +333,28 @@ def state():
         e.update(delta_bnb=bnb(e['delta']), new_bnb=bnb(e['new']))
         e.pop('chat', None)
     total = sum(int(w['balance']) for w in wallets if w['balance'] is not None)
-    return {'wallets': wallets, 'events': events, 'settings': cfg, 'status': status, 'total': bnb(total),
+    return {'health': health, 'wallets': wallets, 'events': events, 'settings': cfg, 'status': status, 'total': bnb(total),
             'total_usdt': bnb(sum(int(w['usdt_balance']) for w in wallets if w['usdt_balance'] is not None)),
             'total_usd': usd(total, price), 'price': {'bnb_usd': price, 'updated': price_at,
             'stale': price_stale, 'error': status.get('price_error'), 'source': SOURCE}}
+
+@app.get('/api/wallets/<int:wid>')
+def wallet_detail(wid):
+    current = state()
+    wallet = next((w for w in current['wallets'] if w['id'] == wid), None)
+    if not wallet:
+        return jsonify(error='Кошелёк не найден.'), 404
+    with db() as c:
+        events = [dict(r) for r in c.execute("""SELECT e.id,e.created,e.asset,e.delta,e.new,e.delivery,e.attempts,
+             e.delivery_error,COALESCE(m.delivery,'off') email_delivery,m.delivery_error email_error
+             FROM events e LEFT JOIN email_outbox m ON m.event_id=e.id
+             WHERE e.wallet_id=? ORDER BY e.id DESC LIMIT 100""", (wid,))]
+        transfers = [withdrawals.public(r) for r in c.execute(
+            "SELECT * FROM withdrawals WHERE wallet_id=? AND state!='preview' ORDER BY created DESC LIMIT 50", (wid,))]
+    for e in events:
+        e['delta_bnb'], e['new_bnb'] = bnb(e['delta']), bnb(e['new'])
+    return {'wallet': wallet, 'events': events, 'transfers': transfers}
+
 
 @app.post('/api/wallets')
 def add_wallets():
@@ -476,10 +509,17 @@ def save_settings():
     if sheets_enabled and (not sheets_id or not (DATA / 'google-service-account.json').is_file()):
         raise ValueError('Укажите таблицу и сначала установите ключ через configure_google.py на VM.')
     withdraw_settings = withdrawals.destination_settings(data,cfg)
+    if withdraw_settings['withdraw_destination'] != cfg.get('withdraw_destination', ''):
+        if data.get('confirm_destination') != withdraw_settings['withdraw_destination']:
+            raise ValueError('Подтвердите новый полный адрес депозита Binance.')
     email_cfg = validate_settings(data, cfg)
     cfg.update(usdt_enabled=usdt_enabled, usdt_threshold=usdt_threshold, interval=interval, threshold=threshold, rpc_urls=urls, telegram_enabled=enabled,
                telegram_token=token, telegram_chat=chat, sheets_enabled=sheets_enabled,
                sheets_id=sheets_id, sheets_tab=sheets_tab, sheets_interval=sheets_interval)
+    digest = data.get('telegram_digest', cfg.get('telegram_digest', False))
+    if type(digest) is not bool:
+        raise ValueError('Неверный режим сводки Telegram.')
+    cfg['telegram_digest'] = digest
     cfg.update(email_cfg)
     cfg.update(withdraw_settings)
     with db() as c:

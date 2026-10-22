@@ -40,12 +40,12 @@ def refresh_price():
 def check_once():
     cfg = settings()
     started = time.time()
-    set_status(check_requested=False, running=True, cycle_started=started)
+    set_status(check_requested=False, running=True, cycle_started=started, cycle_done=0, cycle_total=0)
     try:
         with db() as c:
             wallets = [dict(r) for r in c.execute('SELECT * FROM wallets ORDER BY id')]
         if not wallets:
-            set_status(last_cycle=time.time(), error=None, wallet_count=0)
+            set_status(last_full_cycle=time.time(), last_cycle=time.time(), error=None, wallet_count=0)
             return
         assets = ['BNB', 'USDT'] if cfg['usdt_enabled'] else ['BNB']
         remaining = {(w['id'], asset): w for w in wallets for asset in assets}
@@ -53,9 +53,18 @@ def check_once():
 
         last_error = 'RPC недоступен.'
         used = None
+        with db() as c:
+            r = c.execute("SELECT value FROM status WHERE key='rpc_health'").fetchone()
+            rpc_health = json.loads(r['value']) if r else {}
         for index, url in enumerate(cfg['rpc_urls']):
             if stop.is_set():
                 break
+            import hashlib
+            key = hashlib.sha256(url.encode()).hexdigest()[:16]
+            health = rpc_health.get(key, {})
+            if health.get('until', 0) > time.time():
+                continue
+            consecutive = 0
             try:
                 heartbeat()
                 if int(rpc(url, 'eth_chainId', []), 16) != 56:
@@ -92,15 +101,26 @@ def check_once():
                                     raise RemoteError('RPC вернул некорректный баланс.')
                                 amount = int(raw, 16)
                             record_balance(wid, amount, height, cfg, asset)
+                        consecutive = 0
+                        rpc_health[key] = {'failures': 0, 'until': 0}
                         remaining.pop((wid, asset))
                         used = index + 1
+                        set_status(cycle_done=len(wallets)*len(assets)-len(remaining), cycle_total=len(wallets)*len(assets))
                     except (RemoteError, ValueError, KeyError, TypeError) as exc:
                         last_error = str(exc) if isinstance(exc, RemoteError) else 'Некорректный ответ RPC.'
                         asset_errors[(wid, asset)] = last_error
+                        consecutive += 1
+                        if consecutive >= 3:
+                            failures = min(health.get('failures', 0) + 1, 5)
+                            rpc_health[key] = {'failures': failures, 'until': time.time()+min(300, 15*2**failures)}
+                            break
                     # Pace public RPC requests: one second plus response time per wallet.
-                    stop.wait(1.0)
+                    stop.wait(min(8.0, 2.0 ** consecutive))
             except (RemoteError, ValueError, KeyError, TypeError) as exc:
                 last_error = str(exc) if isinstance(exc, RemoteError) else 'Некорректный ответ RPC.'
+                failures = min(health.get('failures', 0) + 1, 5)
+                rpc_health[key] = {'failures': failures, 'until': time.time()+min(300,15*2**failures)}
+            set_status(rpc_health=rpc_health, cycle_done=len(wallets)*len(assets)-len(remaining), cycle_total=len(wallets)*len(assets))
             if not remaining:
                 break
         # SIGTERM during a deployment is not a failed RPC check. Preserve the
@@ -113,6 +133,8 @@ def check_once():
                     error_col = ASSET_FIELDS[asset][3]
                     c.execute(f'UPDATE wallets SET {error_col}=? WHERE id=?',
                               (asset_errors.get((wid, asset), last_error), wid))
+        if not remaining:
+            set_status(last_full_cycle=time.time())
         set_status(last_cycle=time.time(), error=('; '.join(sorted({asset for _, asset in remaining})) + ': ' + last_error) if remaining else None,
                    rpc_index=used, wallet_count=len(wallets), failed=len(remaining))
     finally:
@@ -155,6 +177,31 @@ def deliver():
         return
     with db() as c:
         events = [dict(r) for r in c.execute("SELECT * FROM events WHERE delivery='pending' AND retry_at<=? ORDER BY id LIMIT 20", (time.time(),))]
+    if cfg.get('telegram_digest'):
+        old = []
+        with db() as c:
+            for e in events:
+                w = c.execute('SELECT notify FROM wallets WHERE id=?', (e['wallet_id'],)).fetchone()
+                if e['created'] < time.time()-3600 and w and w['notify'] and e['chat'] == cfg['telegram_chat']:
+                    old.append(e)
+        if len(old) >= 3:
+            from html import escape
+            text = '<b>Сводка накопившихся изменений баланса</b>\n' + '\n'.join(
+                f"#{e['id']} · {escape(e['name'][:50])}: +{bnb(e['delta'])} {e['asset']}" for e in old)
+            text += '\nПодробности и текущие балансы — в BNB Monitor.'
+            ids = [e['id'] for e in old]
+            try:
+                telegram(cfg, text, cfg['telegram_chat'], html_format=True)
+                with db() as c:
+                    c.executemany("UPDATE events SET delivery='sent',delivery_error=NULL,retry_at=0 WHERE id=? AND delivery='pending'", [(i,) for i in ids])
+                    c.executemany("UPDATE email_outbox SET delivery='suppressed',delivery_error=NULL,retry_at=0 WHERE event_id=? AND delivery='pending'", [(i,) for i in ids])
+                set_status(telegram_digest_last={'at': time.time(), 'events': ids})
+            except RemoteError as exc:
+                with db() as c:
+                    for e in old:
+                        c.execute('UPDATE events SET attempts=attempts+1,retry_at=?,delivery_error=? WHERE id=?',
+                                  (time.time()+min(3600,30*2**min(e['attempts'],7)), str(exc), e['id']))
+            events = [e for e in events if e['id'] not in ids]
     for e in events:
         if stop.is_set():
             break
@@ -235,6 +282,15 @@ def deliver_email():
     if not pending:
         set_status(email_error=None)
 
+def telegram_loop():
+    while not stop.is_set():
+        try:
+            deliver()
+        except Exception:
+            set_status(telegram_error='Ошибка очереди Telegram. Проверьте worker.')
+        stop.wait(2)
+
+
 def email_loop():
     # Separate from RPC sweeps; channel delivery shares a lock.
     while not stop.is_set():
@@ -251,6 +307,7 @@ def run():
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         email_thread = threading.Thread(target=email_loop, name='email-delivery', daemon=True)
         email_thread.start()
+        threading.Thread(target=telegram_loop, name='telegram-delivery', daemon=True).start()
         threading.Thread(target=withdrawals.run, args=(stop,), name='bnb-withdrawals', daemon=True).start()
         import binance, maintenance
         threading.Thread(target=binance.run, args=(stop,), name='binance-status', daemon=True).start()
@@ -286,7 +343,6 @@ def run():
                     if not stop.is_set():
                         export_balances(cycle_started)
                     next_check = time.time() + settings()['interval']
-                deliver()
             except Exception:
                 # Do not log exceptions containing credentials or network URLs.
                 set_status(error='Внутренняя ошибка мониторинга. Проверьте диск и перезапустите worker.', running=False)
