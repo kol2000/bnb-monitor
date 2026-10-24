@@ -14,6 +14,7 @@ class Exchange:
  def call(self,path,params=None,method='GET',signed=True):
   p=params or {};self.calls.append((path,p.copy(),method))
   if path.endswith('/questionnaire-requirements'):return {'questionnaireCountryCode':'NIL'}
+  if path.endswith('/account/commission'):return {'symbol':'BNBUSDT','standardCommission':{'taker':'0.001','buyer':'0'},'taxCommission':{'taker':'0','buyer':'0'},'specialCommission':{'taker':'0','buyer':'0'},'discount':{'enabledForAccount':False,'enabledForSymbol':False,'discountAsset':'BNB','discount':'0.75'}}
   if path.endswith('/account'):return {'canTrade':True,'canWithdraw':True,'balances':[{'asset':'USDT','free':'100','locked':'0'},{'asset':'BNB','free':'10','locked':'0'}]}
   if path.endswith('/getall'):return [{'coin':'BNB','networkList':[{'network':'BSC','withdrawEnable':True,'withdrawFee':self.fee,'withdrawMin':'0.001','withdrawMax':'100','withdrawIntegerMultiple':'0.0001'}]}]
   if path.endswith('/selfSymbols'):return {'data':['BNBUSDT']}
@@ -24,7 +25,7 @@ class Exchange:
     self.ident=p['newClientOrderId']
     if self.fail_buy:raise m.BinanceError('Timeout')
     return {'orderId':'123'}
-   return {'orderId':'123','clientOrderId':self.ident,'symbol':'BNBUSDT','side':'BUY','status':'PARTIALLY_FILLED' if self.partial else 'FILLED','executedQty':'0.1','cummulativeQuoteQty':'50.10'}
+   return {'orderId':'123','clientOrderId':self.ident,'symbol':'BNBUSDT','side':'BUY','status':'PARTIALLY_FILLED' if self.partial else 'FILLED','executedQty':'0.1','cummulativeQuoteQty':'50.05005006'}
   if path.endswith('/myTrades'):return [{'id':'t1','orderId':'123','qty':'0.05' if self.incomplete else '0.1','commission':'0.0001','commissionAsset':'BNB'}]
   if path.endswith('/withdraw/apply'):
    if self.fail_withdraw:raise m.BinanceError('Timeout')
@@ -39,7 +40,7 @@ class BinanceTests(unittest.TestCase):
  def bought(self):
   j=self.preview();m.buy_confirm(j['id']);return m.reconcile(j['id'])
  def test_exact_addition_and_no_post_on_preview(self):
-  j=self.preview();self.assertEqual(j['data']['total'],'50.10');self.assertFalse(any(c[2]=='POST' for c in self.fake.calls))
+  j=self.preview();self.assertEqual(j['data']['total'],'50.05005006');self.assertFalse(any(c[2]=='POST' for c in self.fake.calls))
  def test_timeout_never_duplicates_buy_and_can_reconcile(self):
   j=self.preview();self.fake.fail_buy=True;m.buy_confirm(j['id'])
   with self.assertRaises(m.BinanceError):m.buy_confirm(j['id'])
@@ -73,7 +74,7 @@ class BinanceTests(unittest.TestCase):
  def test_auth_csrf(self):
   c=app.app.test_client();self.assertEqual(c.get('/api/binance/jobs').status_code,401);self.assertEqual(c.post('/api/binance/refresh',json={}).status_code,403)
  def test_exact_payload(self):
-  j=self.bought();m.withdraw_preview(j['id']);m.withdraw_confirm(j['id']);p=[c for c in self.fake.calls if c[2]=='POST'];self.assertEqual(p[0][1]['quoteOrderQty'],'50.10');self.assertEqual(p[1][1]['network'],'BSC');self.assertEqual(p[1][1]['address'],'0x'+'1'*40)
+  j=self.bought();m.withdraw_preview(j['id']);m.withdraw_confirm(j['id']);p=[c for c in self.fake.calls if c[2]=='POST'];self.assertEqual(p[0][1]['quoteOrderQty'],'50.05005006');self.assertEqual(p[1][1]['network'],'BSC');self.assertEqual(p[1][1]['address'],'0x'+'1'*40)
 
  def test_binance_increment_is_not_decimal_count(self):
   self.assertEqual(m.withdrawal_step('1'),Decimal('1'))

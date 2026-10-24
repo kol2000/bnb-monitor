@@ -50,7 +50,7 @@ $('binance-refresh').onclick=refreshBinanceData;
 $('binance-buy-form').onsubmit=e=>{e.preventDefault();binanceAction(async()=>{
  const j=await api('binance/preview','POST',{amount:$('binance-amount').value,address:$('binance-address').value,network:$('binance-network').value,memo:$('binance-memo').value});
  const d=j.data;
- if(!confirm(`Купить BNB по рынку?\n\nВведено: ${d.amount} USDT\nДобавка: 0,10 USDT\nСумма ордера: ${d.total} USDT\nОриентировочно: ${d.estimate} BNB (до торговой комиссии).\n\nЗатем отдельное подтверждение вывода:\n${d.network}\n${d.address}\n\nРыночная цена может измениться.`))return;
+ if(!confirm(`Купить BNB по рынку?\n\nВведено: ${d.amount} USDT\nКомиссия: ≈ ${d.commission_percent}%\nДобавка: ${d.commission_extra} USDT\nСумма ордера: ${d.total} USDT\nПосле торговой комиссии: ≈ ${d.net_estimate} BNB.\nКомиссия вывода отдельно: ${d.fee} BNB.\n\nЗатем отдельное подтверждение вывода:\n${d.network}\n${d.address}\n\nРыночная цена может измениться.`))return;
  await api('binance/'+j.id+'/buy','POST',{});
  toast('Запрос покупки обработан. Статус обновится автоматически.');
  });};

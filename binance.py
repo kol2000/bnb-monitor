@@ -7,7 +7,7 @@ import json
 import re
 import time
 import uuid
-from decimal import Decimal, InvalidOperation, ROUND_DOWN
+from decimal import Decimal, InvalidOperation, ROUND_DOWN, ROUND_UP
 from urllib.parse import urlencode
 from urllib.request import Request, build_opener, HTTPRedirectHandler, ProxyHandler
 from urllib.error import HTTPError
@@ -196,6 +196,33 @@ def history(client, start=None):
         raise BinanceError('Binance не вернул историю выводов.')
     return rows
 
+def buy_commission(client, amount, price, available_bnb):
+    """Estimate net BNB acquisition using the account's current symbol commissions."""
+    data = client.call('/api/v3/account/commission', {'symbol':'BNBUSDT'})
+    try:
+        if data['symbol'] != 'BNBUSDT':
+            raise ValueError()
+        rates = [dec(data[k]['taker']) + dec(data[k]['buyer'])
+                 for k in ('standardCommission','taxCommission','specialCommission')]
+        discount = data['discount']
+        factor = dec(discount['discount'])
+        if factor > 1 or any(type(discount[k]) is not bool for k in ('enabledForAccount','enabledForSymbol')):
+            raise ValueError()
+        full = sum(rates)
+        if full >= 1:
+            raise ValueError()
+        # Conservatively require existing BNB to cover the undiscounted fee.
+        use_discount = (discount['enabledForAccount'] and discount['enabledForSymbol']
+                        and discount['discountAsset'] == 'BNB'
+                        and available_bnb >= amount / (1-full) * full / price)
+        rate = rates[0] * (factor if use_discount else 1) + rates[1] + rates[2]
+        if rate >= 1:
+            raise ValueError()
+        return rate, bool(use_discount)
+    except (KeyError, TypeError, ValueError):
+        raise BinanceError('Не удалось достоверно рассчитать комиссию Binance. Покупка не выполнялась.') from None
+
+
 def buy_preview(body):
     from app import db
     amount = dec(body.get('amount'))
@@ -215,15 +242,22 @@ def buy_preview(body):
     if memo:
         raise BinanceError('Для BSC memo не используется. Очистите поле.')
     a = account(client)
-    total = amount + Decimal('0.10')
+    price = dec(client.call('/api/v3/ticker/price', {'symbol':'BNBUSDT'}, signed=False)['price'])
+    if not price:
+        raise BinanceError('Нет цены BNB.')
+    rate, discounted = buy_commission(client, amount, price, free(a,'BNB'))
     if a.get('canTrade') is not True or a.get('canWithdraw') is not True:
         raise BinanceError('Аккаунту недоступны торговля или вывод.')
     info = client.call('/api/v3/exchangeInfo', {'symbol':'BNBUSDT'}, signed=False)
     symbols = info.get('symbols', [info] if info.get('symbol') == 'BNBUSDT' else [])
     if len(symbols) != 1 or 'MARKET' not in symbols[0].get('orderTypes', []):
         raise BinanceError('MARKET для BNBUSDT недоступен.')
+    precision = symbols[0].get('quoteAssetPrecision', 8)
+    if type(precision) is not int or not 0 <= precision <= 18:
+        raise BinanceError('Некорректная точность USDT.')
+    total = (amount / (1-rate)).quantize(Decimal(1).scaleb(-precision), rounding=ROUND_UP)
     if free(a,'USDT') < total:
-        raise BinanceError('Недостаточно свободных USDT для суммы с добавкой 0,10.')
+        raise BinanceError('Недостаточно свободных USDT для суммы с учётом комиссии.')
     # Server validates all additional venue filters atomically on order placement.
     s = symbols[0]
     if s.get('quoteOrderQtyMarketAllowed') is False or s.get('isSpotTradingAllowed') is False or s.get('status') != 'TRADING':
@@ -241,15 +275,15 @@ def buy_preview(body):
                 raise BinanceError('Сумма превышает максимальную стоимость рыночного ордера.')
     if total < minimum:
         raise BinanceError('Минимальная покупка: %s USDT.' % fmt(minimum))
-    price = dec(client.call('/api/v3/ticker/price', {'symbol':'BNBUSDT'}, signed=False)['price'])
-    if not price:
-        raise BinanceError('Нет цены BNB.')
     fee = dec(net['withdrawFee'])
-    if total/price <= dec(net['withdrawMin']) + fee:
+    if total*(1-rate)/price <= dec(net['withdrawMin']) + fee:
         raise BinanceError('Ориентировочного BNB недостаточно для минимума вывода и комиссии.')
     ident = uuid.uuid4().hex
     data = dict(amount=fmt(amount), total=fmt(total), address=address, network=name, memo=memo,
-                estimate=fmt(total/price), fee=fmt(fee), minimum=str(net['withdrawMin']))
+                estimate=fmt(total/price), net_estimate=fmt(total*(1-rate)/price),
+                commission_rate=fmt(rate), commission_percent=fmt(rate*100),
+                commission_extra=fmt(total-amount), commission_discount=discounted,
+                commission_price=fmt(price), fee=fmt(fee), minimum=str(net['withdrawMin']))
     with db() as c:
         c.execute('INSERT INTO binance_jobs(id,created,state,data) VALUES (?,?,?,?)',
                   (ident,time.time(),'preview',json.dumps(data)))
@@ -263,7 +297,13 @@ def buy_confirm(ident):
     d = j['data']
     client = Client()
     # Recheck available balance before reserving the single dispatch.
-    if free(account(client),'USDT') < dec(d['total']):
+    a = account(client)
+    if 'commission_rate' not in d:
+        raise BinanceError('Пересчитайте покупку: изменилась схема учёта комиссии.')
+    rate, discounted = buy_commission(client, dec(d['amount']), dec(d['commission_price']), free(a,'BNB'))
+    if rate != dec(d['commission_rate']) or discounted != d['commission_discount']:
+        raise BinanceError('Комиссия Binance изменилась. Рассчитайте покупку заново.')
+    if free(a,'USDT') < dec(d['total']):
         raise BinanceError('Недостаточно свободных USDT.')
     network(client, d['network'])
     ensure_withdrawal_supported(client)
