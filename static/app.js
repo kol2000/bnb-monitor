@@ -122,11 +122,18 @@ function checkLine(asset, checked, error, enabled=true) {
 function walletWithdrawalControl(w) {
  const active=activeWithdrawals.find(p=>String(p.wallet_id)===String(w.id)||p.source.toLowerCase()===w.address.toLowerCase()||(p.legs!==1&&p.middle.toLowerCase()===w.address.toLowerCase()));
  const confirming=confirmingWallet===String(w.id);
+ const completed=active?.state==='done';
+ const failed=active?.state==='failed';
+ const waitingBalance=completed&&(!(Number(w.checked)>Number(active.updated))||!!w.error);
+ const hasBalance=w.balance!=null&&BigInt(w.balance)>0n;
+ const locked=active&&!completed&&!failed;
  if(!active&&!confirming&&!(w.balance!=null&&BigInt(w.balance)>0n))return '';
  let label='';
  if(confirming)label='Запускаем вывод…';
+ else if(completed)label=waitingBalance?'✓ Выведено · баланс обновляется…':hasBalance?'✓ Последний вывод завершён':'✓ Выведено';
+ else if(failed)label='Перевод отклонён — см. «Переводы»';
  else if(active)label=active.state==='blocked'?'Вывод приостановлен — см. «Переводы»':active.state==='pending2'?'Вывод в процессе · 2/2: на биржу':active.legs===1?'Вывод в процессе · на биржу':'Вывод в процессе · 1/2: на аккаунт 2';
- return `<small class="wallet-withdraw-line"><button class="quiet wallet-withdraw" data-withdraw="${w.id}" ${withdrawalBusy||active||confirming?'disabled':''}>Вывести</button>${label?`<span class="wallet-withdraw-status" role="status">${escapeHtml(label)}</span>`:''}</small>`;
+ return `<small class="wallet-withdraw-line"><button class="quiet wallet-withdraw" data-withdraw="${w.id}" ${withdrawalBusy||locked||confirming||waitingBalance||!hasBalance?'disabled':''}>Вывести</button>${label?`<span class="wallet-withdraw-status" role="status">${escapeHtml(label)}</span>`:''}</small>`;
 }
 function renderWallets() {
  const wallets = walletRows.filter(matchesBalanceFilter).filter(matchesWalletSearch).sort(compareWallets);
@@ -262,7 +269,7 @@ async function refreshWithdrawals(){
  if(!loggedIn)return;
  try{
   const d=await api('withdrawals');
-  activeWithdrawals=d.items.filter(p=>['pending1','pending2','blocked'].includes(p.state));renderWallets();
+  activeWithdrawals=d.wallet_states||d.items;renderWallets();
   const labels={pending1:'Первый аккаунт → второй: ожидаем подтверждение',pending2:'Второй аккаунт → биржа: ожидаем подтверждение',done:'Оба перевода подтверждены',failed:'Перевод отклонён',blocked:'Вывод приостановлен',cancelled:'Вывод отменён до отправки'};
   $('withdrawal-empty').hidden=d.items.length>0;
   $('withdrawal-items').innerHTML=d.items.map(p=>`<p><strong>${escapeHtml(p.legs===1&&p.state==='pending1'?'Аккаунт 2 → биржа: ожидаем подтверждение':p.state==='done'?'Перевод завершён':labels[p.state]||p.state)}</strong> · ${escapeHtml(date(p.created))}<br><span class="mono">${escapeHtml(short(p.source))} → ${p.legs===1?'':escapeHtml(short(p.middle))+' → '}${escapeHtml(short(p.destination))}</span><br>На ${escapeHtml(p.exchange)}: ${escapeHtml(p.value2)} BNB${p.hash1?` · <a href="https://bscscan.com/tx/${escapeHtml(p.hash1)}" target="_blank" rel="noopener noreferrer">Перевод 1 ↗</a>`:''}${p.hash2?` · <a href="https://bscscan.com/tx/${escapeHtml(p.hash2)}" target="_blank" rel="noopener noreferrer">Перевод 2 ↗</a>`:''}${p.error?`<small class="negative">${escapeHtml(p.error)}</small>`:''}${p.can_cancel?`<button class="quiet" data-withdraw-cancel="${p.id}">Отменить расчёт</button>`:''}</p>`).join('');

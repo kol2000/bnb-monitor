@@ -35,3 +35,15 @@ assert(context.walletWithdrawalControl(row).includes('приостановлен
 vm.runInContext('activeWithdrawals=[]',context);
 assert.strictEqual(context.walletWithdrawalControl({...row,balance:'0'}),'');
 console.log('Wallet withdrawal progress: OK');
+vm.runInContext("activeWithdrawals=[{wallet_id:1,source:'0xabc',middle:'0xdef',legs:2,state:'done',updated:100}]",context);
+let completed=context.walletWithdrawalControl({...row,checked:90});
+assert(completed.includes('Выведено · баланс обновляется'));
+assert(completed.includes('disabled'));
+completed=context.walletWithdrawalControl({...row,checked:101,balance:'0'});
+assert(completed.includes('✓ Выведено'));
+assert(completed.includes('disabled'));
+completed=context.walletWithdrawalControl({...row,checked:101,balance:'100'});
+assert(completed.includes('Последний вывод завершён'));
+assert(!completed.includes('disabled'));
+assert(context.walletWithdrawalControl({...row,checked:101,error:'timeout'}).includes('disabled'));
+console.log('Completed withdrawals remain visible until and after balance refresh: OK');

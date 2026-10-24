@@ -192,6 +192,20 @@ def make_plan(cfg, source, middle, call, direct=False):
             'sheets_enabled': True, 'sheets_id': cfg['sheets_id'], 'sheets_tab': cfg['sheets_tab']}
 
 
+def wallet_statuses(c):
+    """Latest durable transfer per participating address, independent of history pagination."""
+    seen, result = set(), []
+    for row in c.execute("SELECT * FROM withdrawals WHERE state IN ('pending1','pending2','blocked','done','failed') ORDER BY created DESC"):
+        item = public(row)
+        addresses = {item['source'].lower()}
+        if item['legs'] != 1:
+            addresses.add(item['middle'].lower())
+        if addresses - seen:
+            result.append(item)
+        seen.update(addresses)
+    return result
+
+
 def public(row):
     from app import bnb
     p = json.loads(row['plan'])
@@ -403,7 +417,8 @@ def install(app):
     def list_route():
         with db() as c:
             rows = c.execute("SELECT * FROM withdrawals WHERE state!='preview' ORDER BY created DESC LIMIT 30").fetchall()
-        return {'items': [public(r) for r in rows]}
+            wallet_states = wallet_statuses(c)
+        return {'items': [public(r) for r in rows], 'wallet_states': wallet_states}
 
     @app.post('/api/withdrawals/<ident>/cancel')
     def cancel_route(ident):

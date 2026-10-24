@@ -155,3 +155,22 @@ class RpcBackoffTests(unittest.TestCase):
         self.assertEqual(sum(u=='https://first' and m=='eth_getBlockByNumber' for u,m in calls),3)
         with app.db() as c:
             self.assertEqual(c.execute('SELECT count(*) FROM wallets WHERE balance IS NOT NULL').fetchone()[0],6)
+
+class CompletedWithdrawalStatusTests(unittest.TestCase):
+    setUp = fixture.WithdrawTests.setUp
+
+    def test_completed_status_survives_history_pagination(self):
+        p = wd.preview(self.wid)
+        with app.db() as c:
+            c.execute("UPDATE withdrawals SET state='done', updated=100 WHERE id=?", (p['id'],))
+            # Cancelled calculations must not erase the successful transfer label.
+            row = c.execute('SELECT * FROM withdrawals WHERE id=?', (p['id'],)).fetchone()
+            for n in range(35):
+                c.execute("INSERT INTO withdrawals(id,wallet_id,created,state,plan,updated) VALUES (?,?,?,'cancelled',?,?)",
+                          ('cancel-'+str(n),self.wid,row['created']+n+1,row['plan'],101+n))
+            states = wd.wallet_statuses(c)
+        self.assertEqual(len(states), 1)
+        self.assertEqual(states[0]['state'], 'done')
+        self.assertEqual(states[0]['updated'], 100)
+        self.assertNotIn('raw1', states[0])
+        self.assertNotIn('plan', states[0])
