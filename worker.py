@@ -7,6 +7,7 @@ from app import ASSET_FIELDS, usdt_balance, usdt_decimals, DATA, RemoteError, bn
 from sheets_sync import sync_once, export_balances
 from prices import fetch_quote, usd
 import withdrawals
+import operations
 from email_notifications import send_email, EmailError
 
 stop = threading.Event()
@@ -305,6 +306,8 @@ def run():
     import fcntl
     with (DATA / 'worker.lock').open('w') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        threading.Thread(target=operations.run, args=(stop,), name='operation-notices', daemon=True).start()
+        threading.Thread(target=operations.diagnostics_loop, args=(stop,), name='connection-diagnostics', daemon=True).start()
         email_thread = threading.Thread(target=email_loop, name='email-delivery', daemon=True)
         email_thread.start()
         threading.Thread(target=telegram_loop, name='telegram-delivery', daemon=True).start()

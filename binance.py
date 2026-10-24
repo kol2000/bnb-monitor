@@ -158,6 +158,12 @@ def get_job(ident):
 def save(ident, state, data, error=''):
     from app import db
     with db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        before = c.execute('SELECT state FROM binance_jobs WHERE id=?',(ident,)).fetchone()
+        data['updated'] = time.time()
+        if before and before['state'] != 'done' and state == 'done' and data.get('action') != 'sell':
+            from operations import queue_balance
+            queue_balance(c, data['address'])
         c.execute('UPDATE binance_jobs SET state=?,data=?,error=? WHERE id=?',
                   (state, json.dumps(data), error, ident))
 
@@ -228,6 +234,9 @@ def buy_preview(body):
     amount = dec(body.get('amount'))
     if amount <= 0 or amount.as_tuple().exponent < -2:
         raise BinanceError('Введите сумму USDT больше нуля, максимум 2 знака после запятой.')
+    goal = body.get('goal','trade')
+    if goal not in ('trade','wallet'):
+        raise BinanceError('Выберите цель: после покупки или на кошельке.')
     address = str(body.get('address', '')).strip()
     # EVM BNB destinations only; no silent interpretation of other address formats.
     if not re.fullmatch(r'0x[0-9a-fA-F]{40}', address) or int(address[2:],16) == 0:
@@ -245,7 +254,13 @@ def buy_preview(body):
     price = dec(client.call('/api/v3/ticker/price', {'symbol':'BNBUSDT'}, signed=False)['price'])
     if not price:
         raise BinanceError('Нет цены BNB.')
-    rate, discounted = buy_commission(client, amount, price, free(a,'BNB'))
+    fee = dec(net['withdrawFee'])
+    step = withdrawal_step(net.get('withdrawIntegerMultiple'))
+    target_bnb = (amount/price/step).to_integral_value(rounding=ROUND_UP)*step
+    # Match the conservative withdrawal plan: reserve one fee on exchange,
+    # allow another if the venue deducts its fee from the submitted amount.
+    commission_base = (target_bnb + 2*fee)*price if goal == 'wallet' else amount
+    rate, discounted = buy_commission(client, commission_base, price, free(a,'BNB'))
     if a.get('canTrade') is not True or a.get('canWithdraw') is not True:
         raise BinanceError('Аккаунту недоступны торговля или вывод.')
     info = client.call('/api/v3/exchangeInfo', {'symbol':'BNBUSDT'}, signed=False)
@@ -255,7 +270,7 @@ def buy_preview(body):
     precision = symbols[0].get('quoteAssetPrecision', 8)
     if type(precision) is not int or not 0 <= precision <= 18:
         raise BinanceError('Некорректная точность USDT.')
-    total = (amount / (1-rate)).quantize(Decimal(1).scaleb(-precision), rounding=ROUND_UP)
+    total = (commission_base / (1-rate)).quantize(Decimal(1).scaleb(-precision), rounding=ROUND_UP)
     if free(a,'USDT') < total:
         raise BinanceError('Недостаточно свободных USDT для суммы с учётом комиссии.')
     # Server validates all additional venue filters atomically on order placement.
@@ -278,11 +293,19 @@ def buy_preview(body):
     fee = dec(net['withdrawFee'])
     if total*(1-rate)/price <= dec(net['withdrawMin']) + fee:
         raise BinanceError('Ориентировочного BNB недостаточно для минимума вывода и комиссии.')
+    net_estimate = total*(1-rate)/price
+    withdrawal_estimate = ((net_estimate-fee)/step).to_integral_value(rounding=ROUND_DOWN)*step
     ident = uuid.uuid4().hex
-    data = dict(amount=fmt(amount), total=fmt(total), address=address, network=name, memo=memo,
+    data = dict(goal=goal, commission_base=fmt(commission_base), withdrawal_step=fmt(step),
+                reserve_estimate=fmt(net_estimate-withdrawal_estimate),
+                withdrawal_estimate=fmt(withdrawal_estimate),
+                recipient_low=fmt(max(Decimal(0),withdrawal_estimate-fee)),
+                recipient_high=fmt(withdrawal_estimate),
+                recipient_usdt_low=fmt(max(Decimal(0),withdrawal_estimate-fee)*price),
+                target_bnb=fmt(amount/price), amount=fmt(amount), total=fmt(total), address=address, network=name, memo=memo,
                 estimate=fmt(total/price), net_estimate=fmt(total*(1-rate)/price),
                 commission_rate=fmt(rate), commission_percent=fmt(rate*100),
-                commission_extra=fmt(total-amount), commission_discount=discounted,
+                commission_extra=fmt(total-commission_base), total_extra=fmt(total-amount), commission_discount=discounted,
                 commission_price=fmt(price), fee=fmt(fee), minimum=str(net['withdrawMin']))
     with db() as c:
         c.execute('INSERT INTO binance_jobs(id,created,state,data) VALUES (?,?,?,?)',
@@ -300,12 +323,15 @@ def buy_confirm(ident):
     a = account(client)
     if 'commission_rate' not in d:
         raise BinanceError('Пересчитайте покупку: изменилась схема учёта комиссии.')
-    rate, discounted = buy_commission(client, dec(d['amount']), dec(d['commission_price']), free(a,'BNB'))
+    rate, discounted = buy_commission(client, dec(d.get('commission_base',d['amount'])), dec(d['commission_price']), free(a,'BNB'))
     if rate != dec(d['commission_rate']) or discounted != d['commission_discount']:
         raise BinanceError('Комиссия Binance изменилась. Рассчитайте покупку заново.')
     if free(a,'USDT') < dec(d['total']):
         raise BinanceError('Недостаточно свободных USDT.')
-    network(client, d['network'])
+    fresh_network = network(client, d['network'])
+    if d.get('goal') == 'wallet' and (dec(fresh_network['withdrawFee']) != dec(d['fee'])
+            or withdrawal_step(fresh_network.get('withdrawIntegerMultiple')) != dec(d['withdrawal_step'])):
+        raise BinanceError('Комиссия или шаг вывода изменились. Рассчитайте покупку заново.')
     ensure_withdrawal_supported(client)
     with db() as c:
         c.execute('BEGIN IMMEDIATE')
@@ -362,6 +388,12 @@ def reconcile(ident):
                 raise BinanceError('Получены не все исполнения ордера. Вывод пока заблокирован.')
             if len({str(t['id']) for t in trades}) != len(trades):
                 raise BinanceError('Повторяющиеся исполнения. Нужна сверка.')
+            quote = dec(order['cummulativeQuoteQty'])
+            fees = {}
+            for trade in trades:
+                asset = str(trade['commissionAsset'])
+                fees[asset] = fmt(dec(fees.get(asset,0)) + dec(trade['commission']))
+            d.update(gross_bnb=fmt(qty), actual_quote=fmt(quote), average_price=fmt(quote/qty), trade_fees=fees)
             if d.get('action') == 'sell':
                 quote_fee = sum((dec(t['commission']) for t in trades if t['commissionAsset']=='USDT'), Decimal(0))
                 quote = dec(order['cummulativeQuoteQty'])
@@ -384,6 +416,9 @@ def reconcile(ident):
             if str(r.get('address','')).lower() != d['address'].lower() or not withdrawal_asset_matches(r, d['network']):
                 raise BinanceError('Данные вывода не совпали. Нужна ручная сверка.')
             d.update(withdraw_id=str(r['id']),withdraw_status=r['status'],txid=r.get('txId') or r.get('transHash') or '')
+            for source, target in [('amount','withdraw_actual_amount'),('transactionFee','withdraw_actual_fee')]:
+                if r.get(source) is not None:
+                    d[target] = fmt(dec(r[source]))
             state = 'done' if int(r['status']) == 6 else 'closed' if int(r['status']) in (1,3,5) else state
             save(ident,state,d,'Вывод отклонён/отменён на Binance.' if state=='closed' else '')
     except BinanceError as e:

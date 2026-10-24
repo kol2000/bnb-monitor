@@ -11,6 +11,7 @@ import time
 from collections import defaultdict, deque
 from contextlib import contextmanager
 from decimal import Decimal, InvalidOperation
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen, build_opener, ProxyHandler, HTTPRedirectHandler
 
@@ -23,6 +24,7 @@ import withdrawals
 import mexc
 import binance
 import wallet_generator
+import operations
 
 DATA = Path(os.environ.get('DATA_DIR', '/data'))
 DATA.mkdir(parents=True, exist_ok=True)
@@ -81,6 +83,7 @@ def init_db():
         mexc.schema(c)
         binance.schema(c)
         wallet_generator.schema(c)
+        operations.schema(c)
         c.execute('BEGIN IMMEDIATE')
         columns = {r['name'] for r in c.execute('PRAGMA table_info(wallets)')}
         for name, kind in [('usdt_balance', 'TEXT'), ('usdt_block', 'INTEGER'),
@@ -172,8 +175,16 @@ def post_json(url, payload):
         if len(raw) > 2_000_000:
             raise ValueError()
         return json.loads(raw)
+    except RemoteError:
+        raise
+    except HTTPError as exc:
+        raise RemoteError(f'Сервис вернул HTTP {exc.code}.') from None
+    except TimeoutError:
+        raise RemoteError('Тайм-аут подключения к сервису.') from None
+    except URLError as exc:
+        raise RemoteError('Ошибка соединения: '+type(exc.reason).__name__) from None
     except Exception:
-        raise RemoteError('Сервис недоступен, ограничил запросы или вернул неверный ответ.') from None
+        raise RemoteError('Сервис вернул неверный или неполный ответ.') from None
 
 def rpc(url, method, params):
     r = post_json(url, {'jsonrpc': '2.0', 'id': 1, 'method': method, 'params': params})
@@ -590,6 +601,7 @@ def request_check():
 
 
 
+operations.install(app)
 withdrawals.install(app)
 binance.install(app)
 wallet_generator.install(app)

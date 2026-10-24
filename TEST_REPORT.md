@@ -37,3 +37,11 @@
 - Node wallet UI and Binance UI checks pass: disabled sale threshold, UTC history formatting, balance rendering, tab placement, collapsed audit markup. JS syntax and unique HTML IDs checked.
 - Full browser visual check unavailable in this environment: Chromium was absent and the download returned an invalid archive. This is not counted as a passing browser test.
 - No real API keys, trades, withdrawals, or Google Sheet changes were used. Account-specific Binance connectivity and permissions must be checked on the VM with `python3 configure_binance.py --check`.
+
+## Диагностика и сопровождение операций — 24.10.2026
+
+- 220 Python-тестов проходят офлайн. Новые сценарии: приоритетное обновление после подтверждения, сохранение очереди при отстающем RPC, дедупликация завершений и задержек, отсутствие повторов при неопределённой доставке, сохранение последнего успешного результата диагностики, смена исходящего IP, авторизация и CSRF.
+- Проверены оба режима цели Binance, изменение комиссии до подтверждения и фактические исполнения/комиссии. Финансовые запросы в тестах подменены; реальные средства и ключи не использовались.
+- Восстановление проверено на реально зашифрованном тестовом архиве SQLite: успешная расшифровка, неверный ключ, повреждённая БД, запрещённый путь архива, удаление временных файлов. Изоляция команды Docker проверена с имитацией запуска: нет сети и рабочего volume, только read-only входные файлы.
+- Node: test_wallet_ui.js, test_binance_ui.js и test_operations_ui.js проходят. Проверены синтаксис Python/JS, уникальность HTML ID и экранирование текста уведомлений. Полноценный визуальный тест в браузере и реальный Docker-запуск здесь не выполнялись.
+- VM, Telegram, Google и Binance нужно проверить после ручного обновления; диагностика подключений делает только чтение и не создаёт финансовых операций.

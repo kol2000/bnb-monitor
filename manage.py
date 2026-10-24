@@ -112,9 +112,69 @@ def backup():
     finally:
         if stopped and running:
             compose('start',*running)
+    publish_backup_report(backup_report(folder, manifest))
     print('Зашифрованная резервная копия:',folder)
     print('Сохраните backup-encryption.key отдельно: без него восстановить данные нельзя.')
     return folder
+
+
+
+def publish_backup_report(report):
+    """Publish non-secret metadata; a stopped app must not invalidate a good backup."""
+    try:
+        code = "import json,sys; from app import set_status; set_status(backup_report=json.loads(sys.argv[1]))"
+        run(['docker','compose','exec','-T','web','python','-c',code,json.dumps(report)])
+    except Exception:
+        print('Копия сохранена; статус в панели обновить не удалось.')
+
+
+def backup_report(folder, manifest):
+    return {'name':folder.name,'created':manifest['created'],
+            'size':sum((folder/name).stat().st_size for name in ('data.tar.gz.enc','.env.enc')),
+            'checksum':True,'verified':manifest.get('verified'),
+            'verification':manifest.get('verification'),'verify_error':None}
+
+
+def verify_backup(folder=None):
+    if folder is None:
+        candidates = sorted(BACKUPS.glob('*/manifest.json'))
+        if not candidates:
+            raise RuntimeError('Резервных копий нет. Сначала запустите manage.py backup.')
+        folder = candidates[-1].parent
+    folder = Path(folder).resolve()
+    if folder.parent != BACKUPS.resolve():
+        raise RuntimeError('Укажите каталог копии внутри backups/.')
+    manifest = json.loads((folder/'manifest.json').read_text())
+    report = {'name':folder.name,'created':manifest.get('created'),'checksum':False}
+    try:
+        if not manifest.get('encrypted'):
+            raise RuntimeError('Для этой проверки нужна зашифрованная копия.')
+        for name, field in [('data.tar.gz.enc','sha256'),('.env.enc','env_sha256')]:
+            if checksum(folder/name) != manifest[field]:
+                raise RuntimeError('Контрольная сумма резервной копии не совпала.')
+        report = backup_report(folder,manifest)
+        result = run(['docker','run','--rm','--user','0','--network','none','--read-only',
+            '--cap-drop','ALL','--security-opt','no-new-privileges',
+            '--tmpfs','/tmp:rw,nosuid,nodev,noexec,size=1g', '--memory','1536m',
+            '--entrypoint','python',
+            '--mount',f'type=bind,src={folder},dst=/backup,readonly',
+            '--mount',f'type=bind,src={ROOT / "backup-encryption.key"},dst=/backup-encryption.key,readonly',
+            '--mount',f'type=bind,src={ROOT / "backup_crypto.py"},dst=/backup_crypto.py,readonly',
+            '--mount',f'type=bind,src={ROOT / "backup_verify.py"},dst=/backup_verify.py,readonly',
+            manifest['image'], '/backup_verify.py'], True)
+        verification = json.loads(result)
+        if verification.get('integrity') != 'ok':
+            raise RuntimeError('Проверка целостности базы не пройдена.')
+        manifest.update(verified=time.time(),verification=verification)
+        (folder/'manifest.json').write_text(json.dumps(manifest,indent=2))
+        report = backup_report(folder,manifest)
+    except Exception:
+        report['verify_error'] = 'Проверка восстановления не пройдена. Рабочая база не изменена.'
+        publish_backup_report(report)
+        raise
+    publish_backup_report(report)
+    print('Проверка восстановления пройдена. Расшифрованы архив и настройки; SQLite: OK. Рабочая база не изменялась.')
+    return report
 
 
 def rollback(folder):
@@ -151,7 +211,7 @@ def update():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action',choices=['backup','update','rollback'])
+    parser.add_argument('action',choices=['backup','update','rollback','verify-backup'])
     parser.add_argument('folder',nargs='?')
     args=parser.parse_args()
     os.umask(0o077)
@@ -159,6 +219,7 @@ def main():
         if args.action=='rollback':
             if not args.folder: parser.error('Для rollback укажите backups/имя-копии')
             rollback(args.folder)
+        elif args.action=='verify-backup': verify_backup(args.folder)
         elif args.action=='backup': backup()
         else: update()
     except Exception as exc:

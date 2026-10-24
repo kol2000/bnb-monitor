@@ -299,12 +299,16 @@ def confirm(ident):
     return public(current)
 
 
-def update(ident, **values):
+def update(ident, refresh=None, **values):
     from app import db
     values['updated'] = time.time()
     with db() as c:
         c.execute('UPDATE withdrawals SET '+','.join(k+'=?' for k in values)+' WHERE id=?',
                   (*values.values(), ident))
+        if refresh:
+            from operations import queue_balance
+            for address, height in refresh:
+                queue_balance(c, address, height)
 
 
 def finalized_receipt(call, txhash):
@@ -343,7 +347,11 @@ def tick():
             if int(receipt['status'], 16) != 1:
                 update(ident, state='failed', error=f'Перевод {leg} отклонён сетью. Проверьте транзакцию по хешу.')
                 return
-            update(ident, state='pending2' if leg == 1 and plan.get('legs', 2) == 2 else 'done', error=None)
+            source = plan['source'] if leg == 1 else plan['middle']
+            target = plan['middle'] if leg == 1 and plan.get('legs', 2) == 2 else plan['destination']
+            height = int(receipt['blockNumber'], 16)
+            update(ident, refresh=[(source,height),(target,height)],
+                   state='pending2' if leg == 1 and plan.get('legs', 2) == 2 else 'done', error=None)
             set_status(check_requested=True)
             return
         # Absence of a receipt is NOT proof of failure. Re-use the same signed tx.
