@@ -303,6 +303,7 @@ def state():
     cfg['google_key_set'] = (DATA / 'google-service-account.json').is_file()
     with db() as c:
         wallets = [dict(r) for r in c.execute('SELECT * FROM wallets ORDER BY id DESC')]
+        active_withdrawals = [withdrawals.public(r) for r in c.execute("SELECT * FROM withdrawals WHERE state IN ('pending1','pending2','blocked')")]
         events = [dict(r) for r in c.execute('''SELECT e.*, COALESCE(m.delivery, 'off') AS email_delivery,
                     m.attempts AS email_attempts, m.delivery_error AS email_error
                     FROM events e LEFT JOIN email_outbox m ON m.event_id=e.id ORDER BY e.id DESC LIMIT 200''')]
@@ -333,7 +334,7 @@ def state():
         e.update(delta_bnb=bnb(e['delta']), new_bnb=bnb(e['new']))
         e.pop('chat', None)
     total = sum(int(w['balance']) for w in wallets if w['balance'] is not None)
-    return {'health': health, 'wallets': wallets, 'events': events, 'settings': cfg, 'status': status, 'total': bnb(total),
+    return {'active_withdrawals': active_withdrawals, 'health': health, 'wallets': wallets, 'events': events, 'settings': cfg, 'status': status, 'total': bnb(total),
             'total_usdt': bnb(sum(int(w['usdt_balance']) for w in wallets if w['usdt_balance'] is not None)),
             'total_usd': usd(total, price), 'price': {'bnb_usd': price, 'updated': price_at,
             'stale': price_stale, 'error': status.get('price_error'), 'source': SOURCE}}

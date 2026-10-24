@@ -43,3 +43,5 @@
 dialog#wallet-detail{width:min(760px,90vw);max-height:85vh;overflow:auto;background:var(--bg,#151c24);color:var(--text,#e7edf5);border:1px solid #485563;border-radius:16px;padding:24px}dialog::backdrop{background:#0009}#wallet-detail .mono{overflow-wrap:anywhere}
 
 #wallet-detail .mono{white-space:normal} .name [data-detail]{color:inherit;font:inherit;padding-left:0;text-align:left}
+
+.wallet-withdraw-line{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.wallet-withdraw-status{color:var(--accent, #f6cf46);font-family:inherit;font-size:12px;white-space:normal}

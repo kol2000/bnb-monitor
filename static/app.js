@@ -21,6 +21,7 @@ let csrf = '', loadedSettings = false, loadedGoogle = false, loggedIn = false, r
 let toastTimer;
 let checkingWallet = null;
 let withdrawalBusy = false, loadedWithdrawal = false;
+let activeWithdrawals = [], confirmingWallet = null;
 function toast(text, error=false) { $('toast').textContent=text; $('toast').className=error?'error':''; $('toast').hidden=false; clearTimeout(toastTimer); toastTimer=setTimeout(()=>$('toast').hidden=true,7000); }
 async function api(path, method='GET', body) {
   const r=await fetch('/api/'+path,{method,headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},body:body===undefined?undefined:JSON.stringify(body)});
@@ -118,12 +119,21 @@ function checkLine(asset, checked, error, enabled=true) {
  return `<small class="check-line ${enabled&&(error||stale)?'negative':''}" title="${escapeHtml(detail)}">${asset}: ${escapeHtml(stamp)}${enabled&&error?' · ошибка':enabled&&stale?' · устарел':''}</small>`;
 }
 
+function walletWithdrawalControl(w) {
+ const active=activeWithdrawals.find(p=>String(p.wallet_id)===String(w.id)||p.source.toLowerCase()===w.address.toLowerCase()||(p.legs!==1&&p.middle.toLowerCase()===w.address.toLowerCase()));
+ const confirming=confirmingWallet===String(w.id);
+ if(!active&&!confirming&&!(w.balance!=null&&BigInt(w.balance)>0n))return '';
+ let label='';
+ if(confirming)label='Запускаем вывод…';
+ else if(active)label=active.state==='blocked'?'Вывод приостановлен — см. «Переводы»':active.state==='pending2'?'Вывод в процессе · 2/2: на биржу':active.legs===1?'Вывод в процессе · на биржу':'Вывод в процессе · 1/2: на аккаунт 2';
+ return `<small class="wallet-withdraw-line"><button class="quiet wallet-withdraw" data-withdraw="${w.id}" ${withdrawalBusy||active||confirming?'disabled':''}>Вывести</button>${label?`<span class="wallet-withdraw-status" role="status">${escapeHtml(label)}</span>`:''}</small>`;
+}
 function renderWallets() {
  const wallets = walletRows.filter(matchesBalanceFilter).filter(matchesWalletSearch).sort(compareWallets);
  $('wallet-empty').hidden=walletRows.length>0;
  $('wallet-filter-empty').hidden=walletRows.length===0 || wallets.length>0;
  $('wallet-visible-count').textContent='Показано: '+wallets.length+' из '+walletRows.length;
- $('wallet-list').innerHTML=wallets.map(w=>`<tr><td><div class="name"><button class="quiet" data-detail="${w.id}">${escapeHtml(w.name)}</button>${w.account_number?` <small>Аккаунт ${w.account_number}</small>`:''} <button class="quiet" data-rename="${w.id}" data-name="${escapeHtml(w.name)}" title="Переименовать" aria-label="Редактировать название кошелька">✎</button> <button class="quiet" data-copy="${escapeHtml(w.name)}" data-copy-kind="name" title="Копировать название кошелька" aria-label="Копировать название кошелька">⧉</button></div><small><a class="mono" title="${escapeHtml(w.address)}" href="https://bscscan.com/address/${w.address}" target="_blank" rel="noopener noreferrer">${short(w.address)} ↗</a> <button class="quiet" data-copy="${w.address}" title="Копировать адрес">⧉</button></small></td><td class="mono">${w.bnb===null?'—':escapeHtml(w.bnb)}${w.balance != null && BigInt(w.balance)>0n ? `<small><button class="quiet wallet-withdraw" data-withdraw="${w.id}" ${withdrawalBusy?'disabled':''}>Вывести</button></small>` : ''}</td><td class="mono">${escapeHtml(w.usd ?? '—')}</td><td class="mono" title="${escapeHtml(usdtEnabled && w.usdt != null ? w.usdt + ' USDT' : '')}">${usdtEnabled ? (w.usdt == null ? '—' : '$' + formatUsdtTotal(w.usdt).replace(/\s/g,'').replace(',','.')) : 'Выключен'}</td><td class="wallet-checks">${checkLine('BNB', w.checked, w.error)}${checkLine('USDT', w.usdt_checked, w.usdt_error, usdtEnabled)}</td><td><input aria-label="Уведомления ${escapeHtml(w.name)}" type="checkbox" data-notify="${w.id}" ${w.notify?'checked':''}></td><td><div class="wallet-actions"><button class="quiet wallet-refresh" data-check="${w.id}" title="Принудительно обновить баланс сейчас" aria-label="Обновить баланс ${escapeHtml(w.name)}" ${checkingWallet !== null ? 'disabled' : ''}>${checkingWallet === String(w.id) ? 'Обновление…' : '↻ Обновить'}</button><button class="quiet danger wallet-delete" data-delete="${w.id}" title="Удалить кошелёк">Удалить</button></div></td></tr>`).join('');
+ $('wallet-list').innerHTML=wallets.map(w=>`<tr><td><div class="name"><button class="quiet" data-detail="${w.id}">${escapeHtml(w.name)}</button>${w.account_number?` <small>Аккаунт ${w.account_number}</small>`:''} <button class="quiet" data-rename="${w.id}" data-name="${escapeHtml(w.name)}" title="Переименовать" aria-label="Редактировать название кошелька">✎</button> <button class="quiet" data-copy="${escapeHtml(w.name)}" data-copy-kind="name" title="Копировать название кошелька" aria-label="Копировать название кошелька">⧉</button></div><small><a class="mono" title="${escapeHtml(w.address)}" href="https://bscscan.com/address/${w.address}" target="_blank" rel="noopener noreferrer">${short(w.address)} ↗</a> <button class="quiet" data-copy="${w.address}" title="Копировать адрес">⧉</button></small></td><td class="mono">${w.bnb===null?'—':escapeHtml(w.bnb)}${walletWithdrawalControl(w)}</td><td class="mono">${escapeHtml(w.usd ?? '—')}</td><td class="mono" title="${escapeHtml(usdtEnabled && w.usdt != null ? w.usdt + ' USDT' : '')}">${usdtEnabled ? (w.usdt == null ? '—' : '$' + formatUsdtTotal(w.usdt).replace(/\s/g,'').replace(',','.')) : 'Выключен'}</td><td class="wallet-checks">${checkLine('BNB', w.checked, w.error)}${checkLine('USDT', w.usdt_checked, w.usdt_error, usdtEnabled)}</td><td><input aria-label="Уведомления ${escapeHtml(w.name)}" type="checkbox" data-notify="${w.id}" ${w.notify?'checked':''}></td><td><div class="wallet-actions"><button class="quiet wallet-refresh" data-check="${w.id}" title="Принудительно обновить баланс сейчас" aria-label="Обновить баланс ${escapeHtml(w.name)}" ${checkingWallet !== null ? 'disabled' : ''}>${checkingWallet === String(w.id) ? 'Обновление…' : '↻ Обновить'}</button><button class="quiet danger wallet-delete" data-delete="${w.id}" title="Удалить кошелёк">Удалить</button></div></td></tr>`).join('');
 }
 $('wallet-sort').value = walletSort;
 $('hide-small-balances').checked = hideSmallBalances;
@@ -180,7 +190,7 @@ async function refresh(){
  if(s.running&&s.cycle_total)$('last-check').textContent+=` · ${s.cycle_done||0}/${s.cycle_total} проверок`;
  if(s.last_full_cycle)$('last-check').textContent+=' · полный успешный: '+date(s.last_full_cycle);
  if(s.last_cycle_duration)$('last-check').textContent+=` · ${Math.round(s.last_cycle_duration)} сек.`;
- staleAfter=Math.max(180,Number(d.settings.interval)*2+Math.max(0,s.last_cycle_duration||0));walletRows=d.wallets;renderWallets();
+ staleAfter=Math.max(180,Number(d.settings.interval)*2+Math.max(0,s.last_cycle_duration||0));activeWithdrawals=d.active_withdrawals||[];walletRows=d.wallets;renderWallets();
  const ec=d.settings;
  if(!loadedEmail){
   $('email-enabled').checked=ec.email_enabled;
@@ -245,13 +255,14 @@ $('wallet-list').addEventListener('click',async e=>{
   toast('Рассчитываем маршрут и комиссии…');
   const p=await api('wallets/'+b.dataset.withdraw+'/withdraw/preview','POST',{});
   const accepted=p.legs===1?confirm(`Аккаунт 2 → ${p.exchange} (BSC)\nИсточник: ${p.source}\nПолучатель: ${p.destination}\nПолучит: ${p.value1} BNB\nКомиссия: ${p.fee} BNB\n\nПодтвердить один перевод?`):confirm(`Вывести BNB в сети BSC?\n\nПервый аккаунт:\n${p.source}\nБаланс: ${p.balance1} BNB\n\nВторой аккаунт этой сид-фразы:\n${p.middle}\nУже есть: ${p.balance2} BNB\nПолучит: ${p.value1} BNB\n\nБиржа: ${p.exchange}\n${p.destination}\nПолучит всего: ${p.value2} BNB\n\nКомиссия каждого перевода: ${p.fee} BNB.\nВыводится также имеющийся BNB второго аккаунта. USDT не переводится.\n\nПроверьте адрес биржи, сеть BSC и минимальную сумму депозита. Подтвердить оба перевода?`);
-  if(accepted){await api('withdrawals/'+p.id+'/confirm','POST',{});toast('Вывод запущен. Статус и хеши — на вкладке «Переводы».');}
- }catch(err){toast(err.message,true);}finally{withdrawalBusy=false;renderWallets();await refreshWithdrawals();}
+  if(accepted){confirmingWallet=String(b.dataset.withdraw);renderWallets();const result=await api('withdrawals/'+p.id+'/confirm','POST',{});activeWithdrawals=[result];toast('Вывод запущен. Статус и хеши — на вкладке «Переводы».');}
+ }catch(err){toast(err.message,true);}finally{confirmingWallet=null;withdrawalBusy=false;renderWallets();await refreshWithdrawals();}
 });
 async function refreshWithdrawals(){
  if(!loggedIn)return;
  try{
   const d=await api('withdrawals');
+  activeWithdrawals=d.items.filter(p=>['pending1','pending2','blocked'].includes(p.state));renderWallets();
   const labels={pending1:'Первый аккаунт → второй: ожидаем подтверждение',pending2:'Второй аккаунт → биржа: ожидаем подтверждение',done:'Оба перевода подтверждены',failed:'Перевод отклонён',blocked:'Вывод приостановлен',cancelled:'Вывод отменён до отправки'};
   $('withdrawal-empty').hidden=d.items.length>0;
   $('withdrawal-items').innerHTML=d.items.map(p=>`<p><strong>${escapeHtml(p.legs===1&&p.state==='pending1'?'Аккаунт 2 → биржа: ожидаем подтверждение':p.state==='done'?'Перевод завершён':labels[p.state]||p.state)}</strong> · ${escapeHtml(date(p.created))}<br><span class="mono">${escapeHtml(short(p.source))} → ${p.legs===1?'':escapeHtml(short(p.middle))+' → '}${escapeHtml(short(p.destination))}</span><br>На ${escapeHtml(p.exchange)}: ${escapeHtml(p.value2)} BNB${p.hash1?` · <a href="https://bscscan.com/tx/${escapeHtml(p.hash1)}" target="_blank" rel="noopener noreferrer">Перевод 1 ↗</a>`:''}${p.hash2?` · <a href="https://bscscan.com/tx/${escapeHtml(p.hash2)}" target="_blank" rel="noopener noreferrer">Перевод 2 ↗</a>`:''}${p.error?`<small class="negative">${escapeHtml(p.error)}</small>`:''}${p.can_cancel?`<button class="quiet" data-withdraw-cancel="${p.id}">Отменить расчёт</button>`:''}</p>`).join('');
