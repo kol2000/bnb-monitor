@@ -12,7 +12,7 @@ from collections import defaultdict, deque
 from contextlib import contextmanager
 from decimal import Decimal, InvalidOperation
 from urllib.parse import urlparse
-from urllib.request import Request, urlopen
+from urllib.request import Request, urlopen, build_opener, ProxyHandler, HTTPRedirectHandler
 
 from flask import Flask, jsonify, request, session, render_template
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -133,12 +133,41 @@ def threshold_wei(value):
 class RemoteError(Exception):
     pass
 
+class TelegramNoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+class TelegramProxy(ProxyHandler):
+    # Explicit Telegram route must not be bypassed by NO_PROXY from the environment.
+    def proxy_open(self, req, proxy, type):
+        req.set_proxy(urlparse(proxy).netloc, 'http')
+        return None
+
+
+def telegram_opener():
+    proxy = os.environ.get('TELEGRAM_PROXY_URL', '').strip()
+    if not proxy:
+        return build_opener(ProxyHandler({}), TelegramNoRedirect())
+    try:
+        parsed = urlparse(proxy)
+        if (parsed.scheme != 'http' or not parsed.hostname or not parsed.port
+                or parsed.username is not None or parsed.password is not None
+                or parsed.path not in ('', '/') or parsed.query or parsed.fragment
+                or any(c.isspace() for c in proxy)):
+            raise ValueError()
+    except ValueError:
+        raise RemoteError('Неверный TELEGRAM_PROXY_URL: нужен http://IP:порт без логина и пароля.') from None
+    return build_opener(TelegramProxy({'https': proxy}), TelegramNoRedirect())
+
+
 def post_json(url, payload):
     # Never return raw network exceptions: URLs may contain API keys or bot tokens.
     try:
         req = Request(url, data=json.dumps(payload).encode(),
                       headers={'Content-Type': 'application/json', 'User-Agent': 'BNB-Monitor/1.0'})
-        with urlopen(req, timeout=12) as r:
+        open_request = telegram_opener().open if urlparse(url).hostname == 'api.telegram.org' else urlopen
+        with open_request(req, timeout=12) as r:
             raw = r.read(2_000_001)
         if len(raw) > 2_000_000:
             raise ValueError()

@@ -9,7 +9,7 @@ import time
 import uuid
 from decimal import Decimal, InvalidOperation, ROUND_DOWN
 from urllib.parse import urlencode
-from urllib.request import Request, build_opener, HTTPRedirectHandler
+from urllib.request import Request, build_opener, HTTPRedirectHandler, ProxyHandler
 from urllib.error import HTTPError
 
 BASE = 'https://api.binance.com'
@@ -61,7 +61,7 @@ class Client:
         req = Request(BASE + path + '?' + query, method=method, headers=headers,
                       data=b'' if method == 'POST' else None)
         try:
-            with build_opener(NoRedirect()).open(req, timeout=15) as res:
+            with build_opener(ProxyHandler({}), NoRedirect()).open(req, timeout=15) as res:
                 raw = res.read(MAX_RESPONSE_BYTES + 1)
                 if len(raw) > MAX_RESPONSE_BYTES:
                     raise BinanceError('Ответ Binance превышает лимит 32 МиБ. Данные не обработаны.')
