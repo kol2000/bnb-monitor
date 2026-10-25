@@ -29,8 +29,9 @@ $('diagnostics-check').onclick=async()=>{
  try{await api('diagnostics','POST',{});toast('Проверка подключений запрошена.');}catch(e){toast(e.message,true);$('diagnostics-check').disabled=false;}
 };
 $('ip-acknowledge').onclick=async()=>{
- if(!currentOutboundIP||!confirm(`Вы проверили разрешённые IP ключа Binance? Сохранить ${currentOutboundIP} как ожидаемый IP приложения? Настройки на Binance эта кнопка не меняет.`))return;
- try{await api('ip/acknowledge','POST',{ip:currentOutboundIP});await refreshOperations();}catch(e){toast(e.message,true);}
+ const approvedIP=currentOutboundIP;
+ if(!approvedIP||!await uiConfirm(`Вы проверили разрешённые IP ключа Binance? Сохранить ${approvedIP} как ожидаемый IP приложения? Настройки на Binance эта кнопка не меняет.`))return;
+ try{await api('ip/acknowledge','POST',{ip:approvedIP});await refreshOperations();}catch(e){toast(e.message,true);}
 };
 setInterval(refreshOperations,8000);
 refreshOperations();

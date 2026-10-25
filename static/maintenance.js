@@ -11,7 +11,7 @@ $('reconcile-preview').onclick=async()=>{
  }catch(e){toast(e.message,true);}finally{button.disabled=false;}
 };
 $('reconcile-confirm').onclick=async()=>{
- if(!reconcileToken||!confirm('Применить показанные добавления, переименования и удаления? История сохранится, ожидающие уведомления отменятся.'))return;
+ if(!reconcileToken||!await uiConfirm('Применить показанные добавления, переименования и удаления? История сохранится, ожидающие уведомления отменятся.'))return;
  const b=$('reconcile-confirm');b.disabled=true;
  try{const r=await api('sheets/reconcile-confirm','POST',{token:reconcileToken});reconcileToken=null;b.hidden=true;$('reconcile-list').textContent=`Добавлено: ${r.added}. Переименовано: ${r.renamed}. Удалено: ${r.removed}`;await refresh();}
  catch(e){toast(e.message,true);}finally{b.disabled=false;}

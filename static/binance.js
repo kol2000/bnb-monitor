@@ -50,7 +50,7 @@ $('binance-refresh').onclick=refreshBinanceData;
 $('binance-buy-form').onsubmit=e=>{e.preventDefault();binanceAction(async()=>{
  const j=await api('binance/preview','POST',{amount:$('binance-amount').value,goal:$('binance-goal').value,address:$('binance-address').value,network:$('binance-network').value,memo:$('binance-memo').value});
  const d=j.data;
- if(!confirm(`Купить BNB по рынку?\n\nЦель: ${d.goal==='wallet'?'получение на кошелёк':'после покупки'}\nВведено: ${d.amount} USDT\nКомиссия: ≈ ${d.commission_percent}%\nТорговая комиссия: ≈ ${d.commission_extra} USDT\nОбщая добавка: ${d.total_extra} USDT\nСумма ордера: ${d.total} USDT\nПосле торговой комиссии: ≈ ${d.net_estimate} BNB.\nКомиссия вывода: ${d.fee} BNB.\nОжидаемая заявка вывода: ${d.withdrawal_estimate} BNB\nПолучение: ≈ ${d.recipient_low} — ${d.recipient_high} BNB\nНижняя оценка по текущей цене: ≈ ${d.recipient_usdt_low} USDT\nРезерв/округление: ≈ ${d.reserve_estimate} BNB могут остаться на бирже.\n\nЗатем отдельное подтверждение вывода:\n${d.network}\n${d.address}\n\nРыночная цена может измениться.`))return;
+ if(!await uiConfirm(`Купить BNB по рынку?\n\nЦель: ${d.goal==='wallet'?'получение на кошелёк':'после покупки'}\nВведено: ${d.amount} USDT\nКомиссия: ≈ ${d.commission_percent}%\nТорговая комиссия: ≈ ${d.commission_extra} USDT\nОбщая добавка: ${d.total_extra} USDT\nСумма ордера: ${d.total} USDT\nПосле торговой комиссии: ≈ ${d.net_estimate} BNB.\nКомиссия вывода: ${d.fee} BNB.\nОжидаемая заявка вывода: ${d.withdrawal_estimate} BNB\nПолучение: ≈ ${d.recipient_low} — ${d.recipient_high} BNB\nНижняя оценка по текущей цене: ≈ ${d.recipient_usdt_low} USDT\nРезерв/округление: ≈ ${d.reserve_estimate} BNB могут остаться на бирже.\n\nЗатем отдельное подтверждение вывода:\n${d.network}\n${d.address}\n\nРыночная цена может измениться.`))return;
  await api('binance/'+j.id+'/buy','POST',{});
  toast('Запрос покупки обработан. Статус обновится автоматически.');
  });};
@@ -58,7 +58,7 @@ $('binance-jobs').onclick=e=>{
  const b=e.target.closest('button');if(!b)return;
  binanceAction(async()=>{
  if(b.dataset.binanceCheck){await api('binance/'+b.dataset.binanceCheck+'/check','POST',{});return;}
- if(b.dataset.binanceKeep){if(confirm('Оставить купленный BNB на бирже и закрыть эту операцию?'))await api('binance/'+b.dataset.binanceKeep+'/keep','POST',{});return;}
+ if(b.dataset.binanceKeep){if(await uiConfirm('Оставить купленный BNB на бирже и закрыть эту операцию?'))await api('binance/'+b.dataset.binanceKeep+'/keep','POST',{});return;}
  if(b.dataset.binanceWithdraw){const id=b.dataset.binanceWithdraw;const j=await api('binance/'+id+'/withdraw-preview','POST',{});const p=j.data.withdraw_plan;
  if(await confirmBinanceWithdrawal(`Подтвердить вывод BNB с Binance?\n\nСеть: ${p.network}\nАдрес: ${p.address}\nMemo: ${p.memo||'нет'}\nСумма заявки: ${p.amount} BNB\nКомиссия Binance: ${p.fee} BNB\n\nКомиссия дополнительно зарезервирована из купленного BNB. Если биржа удерживает её из суммы заявки, получатель получит меньше; на бирже останется резерв.\n\nПроверьте адрес и сеть. Перевод необратим.`)){await api('binance/'+id+'/withdraw','POST',{});toast('Статус вывода обновится автоматически.');}}
  });
@@ -70,7 +70,7 @@ $('binance-balances').addEventListener('click',e=>{
  binanceAction(async()=>{
   const j=await api('binance/sell-preview','POST',{});
   const d=j.data;
-  if(!confirm(`Продать весь доступный BNB на споте Binance за USDT по рынку?\n\nДоступно: ${d.available} BNB\nК продаже: ${d.quantity} BNB\nОстаток из-за округления: ${d.dust} BNB\nОриентировочно: ${d.estimate} USDT до комиссии.\n\nИтог зависит от рыночной цены. Заблокированный BNB не продаётся.`))return;
+  if(!await uiConfirm(`Продать весь доступный BNB на споте Binance за USDT по рынку?\n\nДоступно: ${d.available} BNB\nК продаже: ${d.quantity} BNB\nОстаток из-за округления: ${d.dust} BNB\nОриентировочно: ${d.estimate} USDT до комиссии.\n\nИтог зависит от рыночной цены. Заблокированный BNB не продаётся.`))return;
   await api('binance/'+j.id+'/sell','POST',{});
   toast('Запрос продажи обработан. Статус обновится автоматически.');
  });

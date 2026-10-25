@@ -4,6 +4,7 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=1">
   <title>BNB Monitor — кошельки</title><link rel="stylesheet" href="/static/style.css"><link rel="stylesheet" href="/static/google.css">
+  <script src="/static/dialogs.js" defer></script>
   <script src="/static/app.js" defer></script>
   <script src="/static/binance.js" defer></script>
   <script src="/static/operations.js" defer></script>
@@ -110,4 +111,8 @@
 <h2 id="binance-withdraw-title">Подтверждение вывода BNB</h2>
 <p id="binance-withdraw-description"></p>
 <div class="save-bar"><button id="binance-withdraw-cancel" type="button" class="secondary" autofocus>Отмена</button><button id="binance-withdraw-confirm" type="button" class="withdraw-confirm">Вывести BNB</button></div>
+</dialog><dialog id="app-dialog" aria-labelledby="app-dialog-title" aria-describedby="app-dialog-description">
+<h2 id="app-dialog-title">Подтверждение действия</h2><p id="app-dialog-description"></p>
+<label id="app-dialog-input-label" hidden>Название<input id="app-dialog-input" type="text" autocomplete="off"></label>
+<div class="save-bar"><button id="app-dialog-cancel" type="button" class="secondary" autofocus>Отмена</button><button id="app-dialog-confirm" type="button">Подтвердить</button></div>
 </dialog></body></html>
