@@ -162,7 +162,7 @@ def withdrawal_plan(v,d):
     client=Client(v); client.address_check(d['address']); n=client.network(); a=client.balances()
     available=min(dec(d['bought']),dec(a.get('BNB',0)))
     amount=round_step(available-dec(n['fee']),n['step'])
-    if amount<=0 or not dec(n['minimum'])<=amount<=dec(n['maximum']):raise ExchangeError('Недостаточно BNB для вывода или превышен лимит.')
+    if amount<=0 or amount<dec(n['minimum']) or (n['maximum'] is not None and amount>dec(n['maximum'])):raise ExchangeError('Недостаточно BNB для вывода или превышен лимит.')
     return dict(amount=fmt(amount),fee=n['fee'],network='BSC',address=d['address'],step=n['step'])
 
 def withdraw_preview(v,ident):

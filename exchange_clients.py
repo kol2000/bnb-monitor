@@ -115,12 +115,14 @@ class Client:
             if n.get('chainWithdraw')!='1':
                 raise ExchangeError('Вывод Bybit BNB/BSC приостановлен.')
             fee=dec(n['withdrawFee']); rate=dec(n['withdrawPercentageFee'] or '0')
-            minimum=dec(n['withdrawMin']); maximum=dec(n['withdrawMax'])
+            minimum=dec(n['withdrawMin'])
+            # Bybit documents -1 as no per-transaction chain maximum.
+            maximum=None if str(n['withdrawMax'])=='-1' else dec(n['withdrawMax'])
             step=precision(n['minAccuracy'])
         # Percentage fees need a separate reviewed calculation; never guess.
         if rate:
             raise ExchangeError('Биржа вернула процентную комиссию вывода. Используйте её интерфейс.')
-        return dict(network='BSC',fee=fmt(fee),minimum=fmt(minimum),maximum=fmt(maximum),step=fmt(step))
+        return dict(network='BSC',fee=fmt(fee),minimum=fmt(minimum),maximum=None if maximum is None else fmt(maximum),step=fmt(step))
 
     def address_check(self,address):
         if self.venue!='bybit':

@@ -75,6 +75,16 @@ class Workflow(unittest.TestCase):
   with self.assertRaises(ValueError):ex.confirm('bybit',j['id'])
  def test_only_purchased_amount_with_fee_reserved(self):
   j=self.bought();r=ex.withdraw_preview('gate',j['id']);p=r['data']['withdraw_plan'];self.assertEqual(p['amount'],'0.09989');self.assertLessEqual(Decimal(p['amount'])+Decimal(p['fee']),Decimal('0.0999'))
+ def test_unlimited_chain_still_reserves_fee_and_checks_minimum(self):
+  network=self.f.network();network['maximum']=None
+  self.f.network=lambda:network
+  plan=ex.withdrawal_plan('bybit',{'address':ADDRESS,'bought':'0.1'})
+  self.assertEqual(plan['amount'],'0.09999')
+  network['minimum']='0.2'
+  with self.assertRaises(ValueError):ex.withdrawal_plan('bybit',{'address':ADDRESS,'bought':'0.1'})
+  network['minimum']='0.0005';network['maximum']='0.01'
+  with self.assertRaises(ValueError):ex.withdrawal_plan('bybit',{'address':ADDRESS,'bought':'0.1'})
+  self.assertEqual(self.f.posts,[])
  def test_withdraw_timeout_not_resent(self):
   j=self.bought();ex.withdraw_preview('gate',j['id']);self.f.timeout=True;ex.withdraw_confirm('gate',j['id'])
   with self.assertRaises(ValueError):ex.withdraw_confirm('gate',j['id'])
@@ -174,6 +184,16 @@ class ResponseFixtures(Adapter):
  def test_bybit_network_fixture(self):
   c=self.client('bybit');c.request=lambda *a:{'rows':[{'coin':'BNB','chains':[dict(chain='BSC',chainWithdraw='1',withdrawFee='0.00001',withdrawPercentageFee='0',withdrawMin='0.0005',withdrawMax='200',minAccuracy='8')]}]}
   self.assertEqual(c.network()['step'],'0.00000001')
+ def test_bybit_unlimited_network_and_invalid_limits(self):
+  c=self.client('bybit')
+  chain=dict(chain='BSC',chainWithdraw='1',withdrawFee='0.00001',withdrawPercentageFee='0',withdrawMin='0.0005',withdrawMax='-1',minAccuracy='8')
+  c.request=lambda *a:{'rows':[{'coin':'BNB','chains':[chain]}]}
+  self.assertIsNone(c.network()['maximum'])
+  for value in ('-2', '', None, 'NaN', 'Infinity'):
+   chain['withdrawMax']=value
+   with self.subTest(value=value),self.assertRaises(ValueError):c.network()
+  chain['withdrawMax']='-1';chain['withdrawFee']='-1'
+  with self.assertRaises(ValueError):c.network()
  def test_missing_network_data_fails_readably(self):
   c=self.client('bybit');c.request=lambda *a:{'rows':[{'coin':'BNB','chains':[dict(chain='BSC',chainWithdraw='1')]}]}
   with self.assertRaisesRegex(ValueError,'неполные'):c.network()
