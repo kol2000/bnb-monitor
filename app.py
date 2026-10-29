@@ -26,6 +26,7 @@ import withdrawals
 import swaps
 import mexc
 import binance
+import exchanges
 import wallet_generator
 import operations
 
@@ -86,6 +87,7 @@ def init_db():
         withdrawals.schema(c)
         mexc.schema(c)
         binance.schema(c)
+        exchanges.schema(c)
         wallet_generator.schema(c)
         operations.schema(c)
         c.execute('BEGIN IMMEDIATE')
@@ -615,6 +617,7 @@ operations.install(app)
 swaps.install(app)
 withdrawals.install(app)
 binance.install(app)
+exchanges.install(app)
 wallet_generator.install(app)
 import maintenance
 maintenance.install(app)

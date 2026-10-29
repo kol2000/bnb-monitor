@@ -2,7 +2,7 @@ const fs=require('fs'),vm=require('vm'),assert=require('assert');
 const els={};function $(id){return els[id] ||= {value:'',innerHTML:'',hidden:true,addEventListener(event,fn){this[event]=fn;}};}
 let calls=[],accepted=false;
 const preview={id:'job',source:'0x'+'1'.repeat(40),middle:'0x'+'2'.repeat(40),destination:'0x'+'1'.repeat(40),amount:'0.1',expected:'60',minimum:'59.7',fee:'0.00001',reserve:'0.00004',retained:'0.00004',middle_reserve:'0.00002'};
-const ctx={$,loggedIn:true,setInterval(){},renderWallets(){},date:String,short:String,escapeHtml:s=>String(s).replaceAll('<','&lt;'),toast(){},uiPrompt:async()=>null,uiConfirm:async()=>accepted,
+const ctx={$,loggedIn:true,setInterval(){},renderWallets(){},date:String,short:String,escapeHtml:s=>String(s).replaceAll('<','&lt;'),toast(){},uiPrompt:async()=>null,chooseDepositExchange:async()=>null,uiConfirm:async()=>accepted,
  api:async(path,method,body)=>{calls.push({path,method,body});if(path==='swaps')return {items:[]};return preview;}};
 vm.createContext(ctx);vm.runInContext(fs.readFileSync('static/swaps.js','utf8'),ctx);
 (async()=>{

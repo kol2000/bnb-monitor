@@ -3,7 +3,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 DATA_DIR=/data
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt && useradd --uid 10001 --create-home monitor && mkdir /data && chown monitor:monitor /data
-COPY app.py worker.py sheets_sync.py prices.py email_notifications.py withdrawals.py mexc.py binance.py wallet_generator.py maintenance.py operations.py swaps.py ./
+COPY app.py worker.py sheets_sync.py prices.py email_notifications.py withdrawals.py mexc.py binance.py wallet_generator.py maintenance.py operations.py swaps.py exchanges.py exchange_clients.py ./
 COPY templates ./templates
 COPY static ./static
 # git pull may inherit manage.py's private umask (077). Normalize only

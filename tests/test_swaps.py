@@ -84,6 +84,15 @@ class SwapTests(unittest.TestCase):
         with app.db() as c:return dict(c.execute('SELECT * FROM swaps WHERE id=?',(ident,)).fetchone())
     def ready(self,kind='swap'):
         p=sw.preview(self.wid,kind,TARGET);sw.confirm(p['id']);return self.row(p['id'])
+    def test_selected_bybit_usdt_address_change_invalidates_preview(self):
+        self.node.tokens[SOURCE]=10**18
+        with app.db() as c:c.execute('INSERT OR REPLACE INTO settings VALUES (?,?)',('withdraw_bybit_usdt_destination',json.dumps(TARGET)))
+        p=sw.preview(self.wid,'usdt',exchange='Bybit')
+        self.assertEqual(p['exchange'],'Bybit');self.assertEqual(p['destination'],TARGET)
+        with app.db() as c:c.execute('UPDATE settings SET value=? WHERE key=?',(json.dumps('0x'+'4'*40),'withdraw_bybit_usdt_destination'))
+        with self.assertRaises(ValueError):sw.confirm(p['id'])
+        self.assertEqual(self.node.sent,[])
+
     def test_preview_reserves_both_accounts_and_does_not_send(self):
         p=sw.preview(self.wid,'swap');r=self.row(p['id']);plan=json.loads(r['plan'])
         self.assertGreater(int(plan['reserve']),int(plan['middle_reserve']))

@@ -142,6 +142,16 @@ class WithdrawTests(unittest.TestCase):
         p = wd.preview(self.wid); self.rpc.balances[SOURCE] += 1
         with self.assertRaises(ValueError): wd.confirm(p['id'])
 
+    def test_selected_gate_route_and_changed_address(self):
+        target='0x'+'3'*40
+        with app.db() as c:c.execute('INSERT OR REPLACE INTO settings VALUES (?,?)',('withdraw_gate_destination',json.dumps(target)))
+        p=wd.preview(self.wid,'Gate')
+        self.assertEqual(p['exchange'],'Gate');self.assertEqual(p['destination'],target)
+        self.assertEqual(app.settings()['withdraw_binance_destination'],TARGET)
+        with app.db() as c:c.execute('UPDATE settings SET value=? WHERE key=?',(json.dumps('0x'+'4'*40),'withdraw_gate_destination'))
+        with self.assertRaises(ValueError):wd.confirm(p['id'])
+        self.assertEqual(self.rpc.sent,[])
+
     def test_changed_destination_requires_new_preview(self):
         p = wd.preview(self.wid)
         with app.db() as c: c.execute('UPDATE settings SET value=? WHERE key=?', (json.dumps('0x'+'1'*40), 'withdraw_destination'))

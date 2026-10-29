@@ -153,7 +153,7 @@ def build_plan(cfg, source, middle, call, kind, target=''):
     elif kind == 'usdt':
         target = wd.destination(target)
         if target in (source, middle) or call('eth_getCode', [target, 'latest']) != '0x':
-            raise ValueError('Укажите отдельный депозитный адрес Binance USDT в сети BSC без кода контракта.')
+            raise ValueError('Укажите отдельный депозитный адрес биржи USDT в сети BSC без кода контракта.')
         amount = token_balance(call, source)
         if amount <= 0:
             raise ValueError('На аккаунте 1 нет USDT.')
@@ -178,6 +178,7 @@ def public(row):
     p = json.loads(row['plan'])
     result = {k:row[k] for k in ('id','wallet_id','kind','state','created','updated','step','hash','error')}
     result.update({k:p[k] for k in ('source','middle','destination')})
+    result['exchange'] = p.get('exchange','Binance')
     for key in ('amount','expected','minimum','fee','reserve','middle_reserve','topup','retained'):
         if key in p: result[key] = bnb(p[key])
     result['hashes'] = json.loads(row['hashes'])
@@ -186,9 +187,11 @@ def public(row):
     return result
 
 
-def preview(wid, kind, target=''):
+def preview(wid, kind, target='', exchange=None):
     from app import db, settings, RemoteError
     cfg = settings()
+    if kind=='usdt' and exchange is not None:
+        target = wd.select_destination(cfg,exchange,'usdt')['withdraw_destination']
     with db() as c:
         assert_idle(c)
         wallet = c.execute('SELECT address FROM wallets WHERE id=?', (wid,)).fetchone()
@@ -202,6 +205,9 @@ def preview(wid, kind, target=''):
         try:
             p = build_plan(cfg, source, middle, wd.node(url), kind, target)
             p['url'] = url
+            if kind=='usdt':
+                p['exchange'] = exchange or 'Binance'
+                p['configured_destination'] = exchange is not None
             break
         except RemoteError as exc: error = exc
     else: raise error or RemoteError('Нет доступного RPC.')
@@ -265,6 +271,8 @@ def confirm(ident):
         assert_idle(c)
         if time.time()-row['created']>120: raise ValueError('Расчёт старше 2 минут. Рассчитайте заново.')
         p=json.loads(row['plan']); call=wd.node(p['url'])
+        if p.get('configured_destination') and wd.select_destination(cfg,p['exchange'],'usdt')['withdraw_destination']!=p['destination']:
+            raise ValueError('Депозитный адрес изменился. Повторите расчёт.')
         verify_contracts(call,row['kind']=='swap')
         # Both account nonces/balances must still match the approved reserve.
         for address,balance,nonce in [(p['source'],p['balance'],p['nonce']),(p['middle'],p['middle_balance'],p['middle_nonce'])]:
@@ -374,7 +382,9 @@ def install(app):
     @app.post('/api/wallets/<int:wid>/swap/preview')
     def swap_preview(wid): return preview(wid,'swap')
     @app.post('/api/wallets/<int:wid>/usdt-transfer/preview')
-    def usdt_preview(wid): return preview(wid,'usdt',(request.get_json() or {}).get('destination',''))
+    def usdt_preview(wid):
+        body=request.get_json() or {}
+        return preview(wid,'usdt',body.get('destination',''),body.get('exchange'))
     @app.post('/api/swaps/<ident>/confirm')
     def swap_confirm(ident): return confirm(ident)
     @app.get('/api/swaps')

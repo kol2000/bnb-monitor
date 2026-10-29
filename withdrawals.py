@@ -16,7 +16,8 @@ from eth_utils import to_checksum_address
 MEXC_DESTINATION = '0x2ce6195ccdf030fb7fd8d674995728ddcac2148b'
 DEFAULTS = {'withdraw_destination': MEXC_DESTINATION, 'withdraw_exchange': 'MEXC',
             'withdraw_mexc_destination': MEXC_DESTINATION, 'withdraw_binance_destination': '',
-            'withdraw_custom_destination': ''}
+            'withdraw_custom_destination': '', 'withdraw_gate_destination':'', 'withdraw_bybit_destination':'',
+            'withdraw_binance_usdt_destination':'', 'withdraw_gate_usdt_destination':'', 'withdraw_bybit_usdt_destination':''}
 
 
 def exchange_label(address):
@@ -62,6 +63,23 @@ def destination_settings(data, cfg):
     # Empty is allowed while saving unrelated settings; preview rejects it.
     return {'withdraw_exchange':'Binance','withdraw_destination':target,
             'withdraw_binance_destination':target}
+
+EXCHANGES = {'Binance':'binance', 'Gate':'gate', 'Bybit':'bybit'}
+
+def select_destination(cfg, exchange, asset='bnb'):
+    if exchange not in EXCHANGES or asset not in ('bnb','usdt'):
+        raise ValueError('Выберите Binance, Gate или Bybit.')
+    key = 'withdraw_'+EXCHANGES[exchange]+('_usdt' if asset=='usdt' else '')+'_destination'
+    target = cfg.get(key,'')
+    if not target:
+        raise ValueError('Сначала сохраните депозит %s %s/BSC в настройках.' % (exchange,asset.upper()))
+    target = destination(target)
+    if exchange=='Binance' and cfg.get('withdraw_destination')!=target:
+        raise ValueError('Настройки адреса Binance расходятся. Сохраните адрес заново.')
+    if target == MEXC_DESTINATION:
+        raise ValueError('Прежний адрес MEXC больше не используется.')
+    return dict(cfg,withdraw_exchange=exchange,withdraw_destination=target)
+
 
 PATHS = ("m/44'/60'/0'/0/0", "m/44'/60'/0'/0/1")
 GAS = 21000
@@ -161,9 +179,9 @@ def idle_account(call, address):
 
 
 def make_plan(cfg, source, middle, call, direct=False):
-    if cfg.get('withdraw_exchange') != 'Binance' or not cfg.get('withdraw_binance_destination'):
+    if cfg.get('withdraw_exchange') not in EXCHANGES or not cfg.get('withdraw_destination'):
         raise ValueError('Сначала сохраните депозитный адрес Binance в настройках.')
-    target = destination(cfg['withdraw_binance_destination'])
+    target = destination(cfg['withdraw_destination'])
     if target == MEXC_DESTINATION or target != cfg.get('withdraw_destination'):
         raise ValueError('Проверьте депозитный адрес Binance. Перевод остановлен.')
     if source == target or (not direct and len({source, middle, target}) != 3):
@@ -225,9 +243,10 @@ def public(row):
     return result
 
 
-def preview(wid):
+def preview(wid, exchange=None):
     from app import db, settings, RemoteError
     cfg = settings()
+    if exchange is not None: cfg = select_destination(cfg,exchange)
     with db() as c:
         from swaps import assert_idle
         assert_idle(c)
@@ -268,7 +287,7 @@ def confirm(ident):
     if time.time() - row['created'] > 180:
         raise ValueError('Расчёт старше 3 минут. Нажмите «Вывести» заново.')
     plan = json.loads(row['plan'])
-    cfg = settings()
+    cfg = select_destination(settings(),plan.get('exchange','Binance'))
     if (cfg['withdraw_destination'].lower() != plan['destination']
             or cfg.get('withdraw_exchange',exchange_label(plan['destination'])) != plan.get('exchange',exchange_label(plan['destination']))
             or any(cfg[k] != plan[k] for k in ('sheets_enabled', 'sheets_id', 'sheets_tab'))):
@@ -464,13 +483,13 @@ def run(stop):
 
 def install(app):
     from app import db
-    from flask import jsonify
+    from flask import jsonify, request
     @app.post('/api/wallets/<int:wid>/withdraw/preview')
     def preview_route(wid):
         if not lock.acquire(blocking=False):
             return jsonify(error='Уже рассчитывается вывод. Подождите.'), 409
         try:
-            return preview(wid)
+            return preview(wid,(request.get_json() or {}).get('exchange','Binance'))
         finally:
             lock.release()
 

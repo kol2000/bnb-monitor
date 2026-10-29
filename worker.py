@@ -314,7 +314,8 @@ def run():
         threading.Thread(target=telegram_loop, name='telegram-delivery', daemon=True).start()
         threading.Thread(target=swaps.run, args=(stop,), name='wallet-swaps', daemon=True).start()
         threading.Thread(target=withdrawals.run, args=(stop,), name='bnb-withdrawals', daemon=True).start()
-        import binance, maintenance
+        import binance, maintenance, exchanges
+        threading.Thread(target=exchanges.run, args=(stop,), name='exchange-status', daemon=True).start()
         threading.Thread(target=binance.run, args=(stop,), name='binance-status', daemon=True).start()
         threading.Thread(target=maintenance.run, args=(stop,), name='seed-audit', daemon=True).start()
         next_check = 0
