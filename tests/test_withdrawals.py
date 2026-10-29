@@ -34,6 +34,8 @@ class FakeRPC:
         self.final = 100
         self.gas = 100000000
     def __call__(self, method, params):
+        if method == 'eth_call' and params[0]['data'].startswith('0x70a08231'):
+            return '0x'+'0'*64
         if method == 'eth_chainId': return hex(self.chain)
         if method == 'eth_getBlockByNumber':
             return {'timestamp': hex(int(time.time())), 'number': hex(self.final), 'hash': '0x'+'ab'*32}
@@ -264,3 +266,4 @@ class RecoveryTests(WithdrawTests):
         with patch('app.rpc',side_effect=remote):
             call,receipt,url=wd.receipt_node(plan,row['hash1'])
         self.assertNotEqual(url,'broken');self.assertIsNone(receipt)
+

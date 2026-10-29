@@ -170,6 +170,10 @@ def make_plan(cfg, source, middle, call, direct=False):
         raise ValueError('Первый, второй и биржевой адреса должны различаться.')
     if call('eth_getCode', [target, 'latest']) != '0x':
         raise ValueError('Биржевой адрес содержит код контракта. Такой вывод не поддерживается.')
+    from swaps import token_balance
+    # Keep gas with USDT instead of sweeping it away. Check live on-chain balances.
+    if token_balance(call, source) > 0 or (not direct and token_balance(call, middle) > 0):
+        raise ValueError('На маршруте есть USDT. Сначала выведите USDT, чтобы не забрать нужный для газа BNB.')
     balance1, nonce1 = idle_account(call, source)
     balance2, nonce2 = (0, 0) if direct else idle_account(call, middle)
     gas_price = int(call('eth_gasPrice', []), 16)
@@ -225,6 +229,8 @@ def preview(wid):
     from app import db, settings, RemoteError
     cfg = settings()
     with db() as c:
+        from swaps import assert_idle
+        assert_idle(c)
         if c.execute("SELECT 1 FROM withdrawals WHERE state IN ('pending1','pending2','blocked')").fetchone():
             raise ValueError('Сначала завершите текущий вывод. Его статус показан в журнале.')
         wallet = c.execute('SELECT address FROM wallets WHERE id=?', (wid,)).fetchone()
@@ -291,8 +297,8 @@ def confirm(ident):
         current = c.execute('SELECT * FROM withdrawals WHERE id=?', (ident,)).fetchone()
         if current['state'] != 'preview':
             return public(current)
-        if c.execute("SELECT 1 FROM withdrawals WHERE state IN ('pending1','pending2','blocked')").fetchone():
-            raise ValueError('Другой вывод уже запущен.')
+        from swaps import assert_idle
+        assert_idle(c)
         c.execute("""UPDATE withdrawals SET state='pending1',raw1=?,raw2=?,hash1=?,hash2=?,updated=?
                      WHERE id=?""", ('0x'+signed[0].raw_transaction.hex(), ('0x'+signed[1].raw_transaction.hex()) if len(signed)>1 else None,
                      '0x'+signed[0].hash.hex(), ('0x'+signed[1].hash.hex()) if len(signed)>1 else None, time.time(), ident))
@@ -419,6 +425,9 @@ def tick():
         if latest_nonce != nonce:
             raise ValueError('Nonce не совпадает с расчётом. Требуется проверка маршрута.')
         if not row[f'attempted{leg}']:
+            from swaps import token_balance
+            if token_balance(call, source) > 0:
+                raise ValueError('На аккаунте есть USDT. Вывод BNB приостановлен для сохранения газа.')
             balance, pending_nonce = idle_account(call, source)
             expected = int(plan['balance1']) if leg == 1 else int(plan['balance2']) + int(plan['value1'])
             if balance != expected or pending_nonce != nonce:
@@ -497,3 +506,4 @@ def install(app):
             if not changed:
                 raise ValueError('Отмена недоступна: транзакция могла быть отправлена.')
         return {'ok': True}
+

@@ -23,6 +23,7 @@ from prices import usd, SOURCE
 from email_notifications import DEFAULTS as EMAIL_DEFAULTS, validate_settings, send_email, EmailError
 from email.utils import make_msgid
 import withdrawals
+import swaps
 import mexc
 import binance
 import wallet_generator
@@ -81,6 +82,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS status (key TEXT PRIMARY KEY, value TEXT NOT NULL);
         CREATE INDEX IF NOT EXISTS event_delivery ON events(delivery, retry_at);
         ''')
+        swaps.schema(c)
         withdrawals.schema(c)
         mexc.schema(c)
         binance.schema(c)
@@ -610,8 +612,10 @@ def request_check():
 
 
 operations.install(app)
+swaps.install(app)
 withdrawals.install(app)
 binance.install(app)
 wallet_generator.install(app)
 import maintenance
 maintenance.install(app)
+

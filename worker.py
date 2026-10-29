@@ -7,6 +7,7 @@ from app import ASSET_FIELDS, usdt_balance, usdt_decimals, DATA, RemoteError, bn
 from sheets_sync import sync_once, export_balances
 from prices import fetch_quote, usd
 import withdrawals
+import swaps
 import operations
 from email_notifications import send_email, EmailError
 
@@ -311,6 +312,7 @@ def run():
         email_thread = threading.Thread(target=email_loop, name='email-delivery', daemon=True)
         email_thread.start()
         threading.Thread(target=telegram_loop, name='telegram-delivery', daemon=True).start()
+        threading.Thread(target=swaps.run, args=(stop,), name='wallet-swaps', daemon=True).start()
         threading.Thread(target=withdrawals.run, args=(stop,), name='bnb-withdrawals', daemon=True).start()
         import binance, maintenance
         threading.Thread(target=binance.run, args=(stop,), name='binance-status', daemon=True).start()
@@ -356,3 +358,4 @@ if __name__ == '__main__':
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     signal.signal(signal.SIGINT, lambda *_: stop.set())
     run()
+
