@@ -186,7 +186,10 @@ def rollback(folder):
     if checksum(folder/('data.tar.gz.enc' if manifest.get('encrypted') else 'data.tar.gz'))!=manifest['sha256']:
         raise RuntimeError('Контрольная сумма резервной копии не совпала.')
     run(['docker','image','inspect',manifest['tag']],True)
-    files = ('--env-file',str(ROOT/'.env'),'-f',str(folder/'compose.yaml'),'-f',str(folder/'image.json'))
+    # Backup .env is encrypted; resolve service env_file and relative mounts
+    # against the live project, not the directory containing backup compose.yaml.
+    files = ('--project-directory',str(ROOT),'--env-file',str(ROOT/'.env'),
+             '-f',str(folder/'compose.yaml'),'-f',str(folder/'image.json'))
     run(['docker','compose',*files,'up','-d','--no-build'])
     wait_healthy(files)
     print('Запущен прежний образ. Актуальная база и журналы операций сохранены.')
@@ -228,3 +231,4 @@ def main():
         raise SystemExit(1)
 
 if __name__=='__main__': main()
+

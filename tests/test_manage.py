@@ -55,13 +55,20 @@ class DeploymentTests(unittest.TestCase):
         with patch.object(manage,'run',return_value=''),patch.object(manage,'backup',return_value=self.root/'backups'/'one'),patch.object(manage,'compose',side_effect=RuntimeError('build error')),patch.object(manage,'rollback') as rollback:
             with self.assertRaises(RuntimeError):manage.update()
             rollback.assert_called_once_with(self.root/'backups'/'one')
-    def test_rollback_keeps_live_database(self):
+    def test_rollback_keeps_live_database_and_uses_live_project_paths(self):
         with patch.object(manage,'run',side_effect=self.fake):folder=manage.backup()
+        self.assertFalse((folder/'.env').exists())
+        self.assertTrue((folder/'.env.enc').exists())
         self.commands=[]
-        with patch.object(manage,'run',side_effect=self.fake),patch.object(manage,'wait_healthy'):
+        with patch.object(manage,'run',side_effect=self.fake),patch.object(manage,'wait_healthy') as healthy:
             manage.rollback(folder)
         self.assertFalse(any(c[:2]==['docker','run'] for c in self.commands))
-        self.assertTrue(any('up' in c and '--no-build' in c for c in self.commands))
+        options = ('--project-directory', str(self.root),
+                   '--env-file', str(self.root/'.env'),
+                   '-f', str(folder/'compose.yaml'),
+                   '-f', str(folder/'image.json'))
+        self.assertIn(['docker','compose',*options,'up','-d','--no-build'], self.commands)
+        healthy.assert_called_once_with(options)
 
     def test_git_uses_invoking_user_with_sudo(self):
         from types import SimpleNamespace
@@ -71,3 +78,4 @@ class DeploymentTests(unittest.TestCase):
             self.assertEqual(command.call_args.kwargs['env']['HOME'],'/home/vmuser')
             manage.run(['docker','compose','ps'])
             self.assertNotIn('user',command.call_args.kwargs)
+
