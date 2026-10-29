@@ -216,6 +216,7 @@ def public(row):
         result[key] = p[key]
     for key in ('balance1', 'balance2', 'value1', 'value2', 'fee'):
         result[key] = bnb(p[key])
+    result['can_retry'] = bool(row['raw1'] and row['attempted1'] and row['state'] in ('pending1','pending2','blocked') and (row['error'] or time.time()-row['updated'] > 60))
     result['can_cancel'] = row['state'] == 'blocked' and not row['attempted1']
     return result
 
@@ -327,6 +328,56 @@ def finalized_receipt(call, txhash):
     return receipt
 
 
+def receipt_node(plan, txhash):
+    """Read the same receipt through another configured node on transport failure."""
+    from app import settings, RemoteError
+    urls = list(dict.fromkeys([plan['url'], *settings().get('rpc_urls', []),
+                              'https://bsc-dataseed.bnbchain.org',
+                              'https://bsc-dataseed1.bnbchain.org']))[:5]
+    for url in urls:
+        try:
+            call = node(url)
+            return call, finalized_receipt(call, txhash), url
+        except RemoteError:
+            continue
+    raise RemoteError('RPC не подтвердили состояние транзакции.')
+
+
+def retry_saved(ident):
+    """Queue only the original signed route; never read seeds or sign again."""
+    from app import db
+    from eth_utils import keccak
+    from eth_account._utils.legacy_transactions import Transaction
+    with db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        row = c.execute('SELECT * FROM withdrawals WHERE id=?', (ident,)).fetchone()
+        if not row or row['state'] not in ('pending1','pending2','blocked') or not row['attempted1']:
+            raise ValueError('Повторная отправка для этой операции недоступна.')
+        plan = json.loads(row['plan'])
+        if time.time()-plan.get('retry_requested_at',0) < 30:
+            raise ValueError('Повтор уже запрошен. Дождитесь результата проверки.')
+        for leg in range(1, plan.get('legs',2)+1):
+            raw, txhash = row[f'raw{leg}'], row[f'hash{leg}']
+            source = plan['source'] if leg==1 else plan['middle']
+            target = plan['middle'] if leg==1 and plan.get('legs',2)==2 else plan['destination']
+            try:
+                decoded = Transaction.from_bytes(bytes.fromhex(raw.removeprefix('0x')))
+                valid = ('0x'+keccak(bytes.fromhex(raw.removeprefix('0x'))).hex()==txhash and
+                         Account.recover_transaction(raw).lower()==source.lower() and
+                         ('0x'+decoded.to.hex()).lower()==target.lower() and
+                         decoded.nonce==plan[f'nonce{leg}'] and decoded.value==int(plan[f'value{leg}']) and
+                         decoded.gas==GAS and decoded.gasPrice==plan['gas_price'] and
+                         not decoded.data and (decoded.v-35)//2==56)
+                if not valid: raise ValueError()
+            except Exception:
+                raise ValueError('Подписанные данные не совпадают с сохранённым маршрутом. Повтор остановлен.') from None
+        plan['retry_requested_at'] = time.time()
+        # Reconcile from the first receipt. Already-used nonces cannot be sent again.
+        c.execute("UPDATE withdrawals SET state='pending1',plan=?,error=?,updated=? WHERE id=?",
+                  (json.dumps(plan),'Повтор запрошен: проверяем сеть и прежние хеши.',time.time(),ident))
+    return {'ok':True, 'message':'Повтор запрошен. Проверяем прежние транзакции; новый перевод не создаётся.'}
+
+
 def tick():
     from app import db, RemoteError, set_status
     with db() as c:
@@ -337,9 +388,11 @@ def tick():
     plan = json.loads(row['plan'])
     leg = 1 if row['state'] == 'pending1' else 2
     try:
-        call = node(plan['url'])
         txhash = row[f'hash{leg}']
-        receipt = finalized_receipt(call, txhash)
+        call, receipt, working_url = receipt_node(plan, txhash)
+        if working_url != plan['url']:
+            plan['url'] = working_url
+            update(ident, plan=json.dumps(plan))
         if receipt == 'waiting':
             update(ident, error='Транзакция включена в блок; ожидаем финализацию.')
             return
@@ -427,6 +480,10 @@ def install(app):
             rows = c.execute("SELECT * FROM withdrawals WHERE state!='preview' ORDER BY created DESC LIMIT 30").fetchall()
             wallet_states = wallet_statuses(c)
         return {'items': [public(r) for r in rows], 'wallet_states': wallet_states}
+
+    @app.post('/api/withdrawals/<ident>/retry')
+    def retry_route(ident):
+        return retry_saved(ident)
 
     @app.post('/api/withdrawals/<ident>/cancel')
     def cancel_route(ident):

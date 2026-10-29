@@ -1,4 +1,6 @@
 import hashlib
+import gzip
+import io
 import hmac
 import json
 import os
@@ -168,12 +170,18 @@ def post_json(url, payload):
     # Never return raw network exceptions: URLs may contain API keys or bot tokens.
     try:
         req = Request(url, data=json.dumps(payload).encode(),
-                      headers={'Content-Type': 'application/json', 'User-Agent': 'BNB-Monitor/1.0'})
+                      headers={'Content-Type': 'application/json', 'User-Agent': 'BNB-Monitor/1.0', 'Accept-Encoding':'gzip'})
         open_request = telegram_opener().open if urlparse(url).hostname == 'api.telegram.org' else urlopen
-        with open_request(req, timeout=12) as r:
+        with open_request(req, timeout=30 if payload.get('jsonrpc') == '2.0' else 12) as r:
             raw = r.read(2_000_001)
+            encoding = r.headers.get('Content-Encoding', '').lower()
         if len(raw) > 2_000_000:
             raise ValueError()
+        if encoding == 'gzip':
+            with gzip.GzipFile(fileobj=io.BytesIO(raw)) as compressed:
+                raw = compressed.read(2_000_001)
+            if len(raw) > 2_000_000:
+                raise ValueError()
         return json.loads(raw)
     except RemoteError:
         raise

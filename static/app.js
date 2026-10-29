@@ -265,6 +265,7 @@ $('wallet-list').addEventListener('click',async e=>{
   if(accepted){confirmingWallet=String(b.dataset.withdraw);renderWallets();const result=await api('withdrawals/'+p.id+'/confirm','POST',{});activeWithdrawals=[result];toast('Вывод запущен. Статус и хеши — на вкладке «Переводы».');}
  }catch(err){toast(err.message,true);}finally{confirmingWallet=null;withdrawalBusy=false;renderWallets();await refreshWithdrawals();}
 });
+const withdrawalRetries=new Set();
 async function refreshWithdrawals(){
  if(!loggedIn)return;
  try{
@@ -272,7 +273,7 @@ async function refreshWithdrawals(){
   activeWithdrawals=d.wallet_states||d.items;renderWallets();
   const labels={pending1:'Первый аккаунт → второй: ожидаем подтверждение',pending2:'Второй аккаунт → биржа: ожидаем подтверждение',done:'Оба перевода подтверждены',failed:'Перевод отклонён',blocked:'Вывод приостановлен',cancelled:'Вывод отменён до отправки'};
   $('withdrawal-empty').hidden=d.items.length>0;
-  $('withdrawal-items').innerHTML=d.items.map(p=>`<p><strong>${escapeHtml(p.legs===1&&p.state==='pending1'?'Аккаунт 2 → биржа: ожидаем подтверждение':p.state==='done'?'Перевод завершён':labels[p.state]||p.state)}</strong> · ${escapeHtml(date(p.created))}<br><span class="mono">${escapeHtml(short(p.source))} → ${p.legs===1?'':escapeHtml(short(p.middle))+' → '}${escapeHtml(short(p.destination))}</span><br>На ${escapeHtml(p.exchange)}: ${escapeHtml(p.value2)} BNB${p.hash1?` · <a href="https://bscscan.com/tx/${escapeHtml(p.hash1)}" target="_blank" rel="noopener noreferrer">Перевод 1 ↗</a>`:''}${p.hash2?` · <a href="https://bscscan.com/tx/${escapeHtml(p.hash2)}" target="_blank" rel="noopener noreferrer">Перевод 2 ↗</a>`:''}${p.error?`<small class="negative">${escapeHtml(p.error)}</small>`:''}${p.can_cancel?`<button class="quiet" data-withdraw-cancel="${p.id}">Отменить расчёт</button>`:''}</p>`).join('');
+  $('withdrawal-items').innerHTML=d.items.map(p=>`<p><strong>${escapeHtml(p.legs===1&&p.state==='pending1'?'Аккаунт 2 → биржа: ожидаем подтверждение':p.state==='done'?'Перевод завершён':labels[p.state]||p.state)}</strong> · ${escapeHtml(date(p.created))}<br><span class="mono">${escapeHtml(short(p.source))} → ${p.legs===1?'':escapeHtml(short(p.middle))+' → '}${escapeHtml(short(p.destination))}</span><br>На ${escapeHtml(p.exchange)}: ${escapeHtml(p.value2)} BNB${p.hash1?` · <a href="https://bscscan.com/tx/${escapeHtml(p.hash1)}" target="_blank" rel="noopener noreferrer">Перевод 1 ↗</a>`:''}${p.hash2?` · <a href="https://bscscan.com/tx/${escapeHtml(p.hash2)}" target="_blank" rel="noopener noreferrer">Перевод 2 ↗</a>`:''}${p.error?`<small class="negative">${escapeHtml(p.error)}</small>`:''}${p.can_retry?`<button class="quiet" data-withdraw-retry="${p.id}" ${withdrawalRetries.has(p.id)?'disabled':''}>${withdrawalRetries.has(p.id)?'Проверяем и повторяем…':'Повторить отправку'}</button>`:''}${p.can_cancel?`<button class="quiet" data-withdraw-cancel="${p.id}">Отменить расчёт</button>`:''}</p>`).join('');
  }catch(err){toast(err.message,true);}
 }
 setInterval(refreshWithdrawals,5000);
@@ -280,4 +281,13 @@ setInterval(refreshWithdrawals,5000);
 $('withdrawal-items').addEventListener('click',async e=>{
  const b=e.target.closest('[data-withdraw-cancel]');if(!b)return;
  try{await api('withdrawals/'+b.dataset.withdrawCancel+'/cancel','POST',{});toast('Расчёт отменён. Можно запустить новый вывод.');await refreshWithdrawals();}catch(err){toast(err.message,true);}
+});
+
+$('withdrawal-items').addEventListener('click',async e=>{
+ const b=e.target.closest('[data-withdraw-retry]');if(!b)return;
+ const id=b.dataset.withdrawRetry;if(withdrawalRetries.has(id))return;
+ withdrawalRetries.add(id);b.disabled=true;b.textContent='Проверяем и повторяем…';
+ try{const r=await api('withdrawals/'+id+'/retry','POST',{});toast(r.message);}
+ catch(err){toast(err.message,true);}
+ finally{withdrawalRetries.delete(id);await refreshWithdrawals();}
 });

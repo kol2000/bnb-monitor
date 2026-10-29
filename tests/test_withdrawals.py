@@ -231,3 +231,36 @@ class SeedMappingTests(unittest.TestCase):
 
 
 if __name__ == '__main__': unittest.main()
+
+
+class RecoveryTests(WithdrawTests):
+    def test_retry_preserves_signed_bytes_and_reconciles_first_leg(self):
+        row=self.ready();wd.tick();self.receipt(row['hash1']);wd.tick()
+        self.rpc.balances[MIDDLE]+=int(json.loads(row['plan'])['value1'])
+        original=self.row(row['id'])
+        with app.db() as c:c.execute("UPDATE withdrawals SET state='blocked',error='RPC unavailable' WHERE id=?",(row['id'],))
+        wd.retry_saved(row['id'])
+        queued=self.row(row['id'])
+        self.assertEqual(queued['state'],'pending1')
+        self.assertEqual(queued['raw1'],original['raw1']);self.assertEqual(queued['raw2'],original['raw2'])
+        self.assertEqual(queued['hash2'],original['hash2'])
+        count=len(self.rpc.sent);wd.tick();self.assertEqual(len(self.rpc.sent),count)
+        wd.tick();self.assertEqual(self.rpc.sent[-1],original['raw2'])
+        with self.assertRaises(ValueError):wd.retry_saved(row['id'])
+
+    def test_retry_rejects_corrupted_signature_and_completed_job(self):
+        row=self.ready();wd.tick()
+        with app.db() as c:c.execute("UPDATE withdrawals SET raw2='0x00' WHERE id=?",(row['id'],))
+        with self.assertRaises(ValueError):wd.retry_saved(row['id'])
+        with app.db() as c:c.execute("UPDATE withdrawals SET state='done' WHERE id=?",(row['id'],))
+        with self.assertRaises(ValueError):wd.retry_saved(row['id'])
+
+    def test_fallback_on_receipt_rpc_failure(self):
+        row=self.ready()
+        def remote(url,method,params):
+            if url=='broken':raise app.RemoteError('unavailable')
+            return self.rpc(method,params)
+        plan=json.loads(row['plan']);plan['url']='broken'
+        with patch('app.rpc',side_effect=remote):
+            call,receipt,url=wd.receipt_node(plan,row['hash1'])
+        self.assertNotEqual(url,'broken');self.assertIsNone(receipt)
