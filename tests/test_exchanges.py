@@ -196,10 +196,19 @@ class FundingWorkflow(unittest.TestCase):
  def test_only_shortfall_and_reservation_blocks_other_job(self):
   self.f.free='20';j=self.preview('bybit')
   required=Decimal(j['data']['total'])*(1+Decimal(j['data']['market']['fee']))
-  self.assertLess(abs(Decimal(j['data']['funding_amount'])-(required-20)),Decimal('0.000001'))
+  self.assertLess(abs(Decimal(j['data']['funding_amount'])-(required-20)),Decimal('0.01'))
+  self.assertGreaterEqual(Decimal(j['data']['funding_amount']),required-20)
+  self.assertGreaterEqual(Decimal(j['data']['funding_amount']).as_tuple().exponent,-2)
   other=self.preview('bybit');ex.confirm('bybit',j['id'])
   with self.assertRaises(ValueError):ex.confirm('bybit',other['id'])
   self.assertEqual(len(self.transfers),1)
+ def test_precision_rejection_closes_without_order(self):
+  def reject(*a):raise clients.ExchangeRejected(131210)
+  self.f.fund_trading=reject
+  j=self.preview('bybit');r=ex.confirm('bybit',j['id'])
+  self.assertEqual(r['state'],'closed');self.assertFalse(r['data']['funding_pending'])
+  self.assertEqual(self.f.posts,[])
+  with self.assertRaises(ValueError):ex.confirm('bybit',j['id'])
  def test_failed_transfer_never_buys(self):
   j=self.preview('bybit');ex.confirm('bybit',j['id']);self.transfer_state='FAILED'
   self.assertEqual(ex.reconcile('bybit',j['id'])['state'],'closed');self.assertEqual(self.f.posts,[])

@@ -12,6 +12,11 @@ from binance import NoRedirect, fmt
 class ExchangeError(ValueError):
     pass
 
+class ExchangeRejected(ExchangeError):
+    def __init__(self, code):
+        self.code=code
+        super().__init__('Bybit отклонил запрос: код '+str(code))
+
 def dec(value):
     try:
         n=Decimal(str(value))
@@ -76,7 +81,7 @@ class Client:
             if self.venue=='bybit':
                 if data.get('retCode')!=0:
                     code=data.get('retCode')
-                    raise ExchangeError('Bybit отклонил запрос: код '+str(code if isinstance(code,int) else 'API'))
+                    raise ExchangeRejected(code if isinstance(code,int) else 'API')
                 return data['result']
             return data
         except ExchangeError:

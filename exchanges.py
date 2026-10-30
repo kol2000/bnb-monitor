@@ -6,7 +6,7 @@ import time
 import uuid
 from contextlib import contextmanager
 from decimal import Decimal, ROUND_DOWN, ROUND_UP
-from exchange_clients import Client, ExchangeError, dec, fmt
+from exchange_clients import Client, ExchangeError, ExchangeRejected, dec, fmt
 
 VENUES={'gate':'Gate','bybit':'Bybit'}
 ACTIVE=('ordering','bought','withdrawing')
@@ -66,7 +66,8 @@ def funding_needed(v, client, available, required):
     shortage=max(Decimal(0),required-dec(available))
     if not shortage:return '0'
     if v!='bybit':raise ExchangeError('Недостаточно свободных USDT с резервом комиссии.')
-    amount=round_step(shortage,'0.000001',True)
+    # Transfer whole USDT cents; trading quote precision is not transfer precision.
+    amount=round_step(shortage,'0.01',True)
     if dec(client.funding_balances().get('USDT',0))<amount:
         raise ExchangeError('Недостаточно USDT на торговом аккаунте и финансировании с резервом комиссии.')
     return fmt(amount)
@@ -136,6 +137,11 @@ def confirm(v,ident):
         try:
             Client(v).fund_trading(d['funding_id'],d['funding_amount'])
             return save(j)
+        except ExchangeRejected as e:
+            if e.code==131210:
+                d['funding_pending']=False;d['funding_rejected']=e.code
+                return save(j,'closed','Bybit отклонил точность суммы перевода (131210). Покупка не отправлялась. Создайте новый расчёт.')
+            return save(j,error=str(e))
         except Exception as e:
             return save(j,error=str(e) if isinstance(e,ValueError) else 'Перевод не подтверждён. Проверяем статус; повтор запрещён.')
     reserve(j,'preview','ordering')
