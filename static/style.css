@@ -61,3 +61,21 @@ dialog .secondary{background:transparent;border-color:#34404f;color:#edf2f7}
 
 
 #exchange-choice select{background:#0d131b;color:#edf2f7;border-color:#34404f}#exchange-choice-address{overflow-wrap:anywhere}
+
+/* Align wallet identity and amounts; keep asset withdrawal buttons together. */
+.wallet-row>td{vertical-align:top}
+.wallet-row .name{display:flex;align-items:center;gap:4px;white-space:nowrap}
+.wallet-row .name>button{flex-shrink:0;white-space:nowrap}
+.wallet-row .name>small{margin:0;white-space:nowrap}
+.wallet-balance-value{display:inline-block;padding-top:5px;line-height:20px}
+.wallet-row>.wallet-value-cell{padding-top:23px;line-height:20px}
+.wallet-money-actions{display:grid;grid-template-columns:max-content max-content;align-items:center;gap:4px 8px;margin-top:8px;font-family:system-ui,sans-serif;white-space:normal}
+.wallet-money-actions:empty{display:none}
+.wallet-money-actions .wallet-withdraw-line{display:contents}
+.wallet-money-actions [data-withdraw]{grid-column:1;grid-row:1}
+.wallet-money-actions [data-usdt-transfer]{grid-column:2;grid-row:1}
+.wallet-money-actions .wallet-swap{grid-column:1/-1;grid-row:2;justify-self:start;color:#70b7ff}
+.wallet-money-actions button{white-space:nowrap}
+.wallet-money-actions [role="status"]{grid-column:1/-1;font-size:12px}
+[data-theme="light"] .wallet-money-actions .wallet-swap{color:#125dc4}
+@media(max-width:800px){.wallet-row>.wallet-value-cell{padding-top:20px}}

@@ -7,7 +7,7 @@ function walletSwapControls(w){
  if(w.account_number===2)return '';
  const bnb=w.balance!=null&&BigInt(w.balance)>0n;
  const usdt=w.usdt_balance!=null&&BigInt(w.usdt_balance)>0n;
- return `<small class="wallet-withdraw-line">${bnb?`<button class="quiet" data-swap="${w.id}" ${busy?'disabled':''}>BNB → USDT</button>`:''}${usdt?`<button class="quiet wallet-withdraw" data-usdt-transfer="${w.id}" ${busy?'disabled':''}>Вывести USDT</button>`:''}${label?`<span role="status">${escapeHtml(label)}</span>`:''}</small>`;
+ return `<small class="wallet-withdraw-line">${bnb?`<button class="quiet wallet-swap" data-swap="${w.id}" ${busy?'disabled':''}>Обмен BNB → USDT</button>`:''}${usdt?`<button class="quiet wallet-withdraw" data-usdt-transfer="${w.id}" ${busy?'disabled':''}>Вывести USDT</button>`:''}${label?`<span role="status">${escapeHtml(label)}</span>`:''}</small>`;
 }
 async function refreshSwaps(){
  if(!loggedIn)return;
