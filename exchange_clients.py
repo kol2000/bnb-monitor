@@ -96,6 +96,14 @@ class Client:
         # Only own transferable funds; no collateral borrowing or bonus spending.
         return {r['coin']:fmt(min(dec(r['transferBalance']),dec(r['walletBalance']))) for r in data['balance'] if r['coin'] in ('BNB','USDT')}
 
+    def funding_balances(self):
+        if self.venue!='bybit':
+            raise ExchangeError('Аккаунт финансирования доступен только для Bybit.')
+        data=self.request('/v5/asset/transfer/query-account-coins-balance',{'accountType':'FUND','coin':'BNB,USDT','withBonus':0})
+        if data.get('accountType')!='FUND':
+            raise ExchangeError('Ожидается аккаунт финансирования Bybit FUND.')
+        return {r['coin']:fmt(min(dec(r['transferBalance']),dec(r['walletBalance']))) for r in data['balance'] if r['coin'] in ('BNB','USDT')}
+
     def network(self):
         if self.venue=='gate':
             rows=self.request('/wallet/currency_chains',{'currency':'BNB'},signed=False)

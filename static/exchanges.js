@@ -48,7 +48,11 @@ async function refreshVenueJobs(v){
 }
 async function refreshVenue(v){
  const r=await api('exchanges/'+v+'/refresh','POST',{});
- $(v+'-balances').textContent=`Доступно: ${r.balances.BNB||'0'} BNB · ${r.balances.USDT||'0'} USDT`;
+ $(v+'-balances').textContent=`${v==='bybit'?'Единый торговый — доступно':'Доступно'}: ${r.balances.BNB||'0'} BNB · ${r.balances.USDT||'0'} USDT`;
+ if(v==='bybit'){
+  const f=r.funding_balances;
+  $('bybit-funding').textContent=f?`Финансирование — доступно: ${f.BNB||'0'} BNB · ${f.USDT||'0'} USDT`:'Финансирование: баланс не получен.';
+ }
  $(v+'-updated').textContent='Проверено: '+date(r.updated);
  $(v+'-warnings').textContent=r.warnings.join('\n');
  $(v+'-sell').dataset.unavailable=String(!binanceCanSellBnb(r.balances.BNB||'0'));

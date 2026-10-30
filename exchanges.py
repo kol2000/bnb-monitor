@@ -204,12 +204,15 @@ def install(app):
     @app.post('/api/exchanges/<v>/refresh')
     def exchanges_refresh(v):
         with locked(v):
-            client=Client(v); a=client.balances(); warnings=[]
+            client=Client(v); a=client.balances(); warnings=[]; funding=None
+            if v=='bybit':
+                try:funding=client.funding_balances()
+                except ValueError as e:warnings.append('Финансирование: '+str(e))
             try:n=client.network()
             except ValueError as e:n=None; warnings.append(str(e))
             try:h=client.history()
             except ValueError as e:h=[]; warnings.append(str(e))
-            return dict(balances=a,network=n,history=h,warnings=warnings,updated=time.time())
+            return dict(balances=a,funding_balances=funding,network=n,history=h,warnings=warnings,updated=time.time())
     @app.post('/api/exchanges/<v>/preview')
     def exchanges_preview(v):
         with locked(v):return preview(v,request.get_json() or {})

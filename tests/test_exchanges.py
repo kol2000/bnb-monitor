@@ -197,6 +197,17 @@ class ResponseFixtures(Adapter):
  def test_missing_network_data_fails_readably(self):
   c=self.client('bybit');c.request=lambda *a:{'rows':[{'coin':'BNB','chains':[dict(chain='BSC',chainWithdraw='1')]}]}
   with self.assertRaisesRegex(ValueError,'неполные'):c.network()
+ def test_bybit_funding_is_separate_readonly_balance(self):
+  c=self.client('bybit');calls=[]
+  def request(path,params):
+   calls.append((path,params))
+   return dict(accountType=params['accountType'],balance=[dict(coin='USDT',walletBalance='172.8519',transferBalance='170')])
+  c.request=request
+  self.assertEqual(c.funding_balances(),{'USDT':'170'})
+  self.assertEqual(calls[0][1]['accountType'],'FUND')
+  self.assertEqual(calls[0][1]['withBonus'],0)
+  c.request=lambda *a:dict(accountType='UNIFIED',balance=[])
+  with self.assertRaises(ValueError):c.funding_balances()
  def test_bybit_market_and_transferable_balance(self):
   c=self.client('bybit')
   def request(path,*a,**k):
