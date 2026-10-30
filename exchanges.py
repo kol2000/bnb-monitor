@@ -78,12 +78,13 @@ def plan(v,body):
     a=client.balances(); m=client.market(); price=dec(m['price']); rate=dec(m['fee'])
     if not price or rate>=Decimal('0.1'):raise ExchangeError('Не удалось проверить цену/комиссию.')
     if action=='sell':
-        available=dec(a.get('BNB',0))
+        funding=round_step(dec(client.funding_balances().get('BNB',0)),'0.00000001') if v=='bybit' else Decimal(0)
+        available=dec(a.get('BNB',0))+funding
         # Reserve potential BNB trading fee instead of assuming the fee asset.
         amount=round_step(available/(1+rate),m['base_step'])
         quote_amount=amount*price
         if amount<=0 or amount>dec(m['max_base']):raise ExchangeError('Количество вне лимитов рыночной продажи.')
-        data=dict(action=action,quantity=fmt(amount),available=fmt(available),dust=fmt(available-amount),estimate=fmt(quote_amount),market=m)
+        data=dict(action=action,funding_amount=fmt(funding),funding_coin='BNB',quantity=fmt(amount),available=fmt(available),dust=fmt(available-amount),estimate=fmt(quote_amount),market=m)
     else:
         target=address(str(body.get('address','')).strip())
         client.address_check(target) # BEFORE purchase, not after spending USDT.
@@ -120,8 +121,8 @@ def confirm(v,ident):
     j=job(v,ident); d=j['data']
     if j['state']!='preview' or time.time()-j['created']>120:raise ExchangeError('Расчёт истёк или уже подтверждён.')
     fresh=plan(v,d)
-    keys=('quantity','available') if d['action']=='sell' else ('network','address')
-    if any(fresh[k]!=d[k] for k in keys) or fresh['market']['fee']!=d['market']['fee']:
+    keys=('quantity','available','funding_amount') if d['action']=='sell' else ('network','address')
+    if any(fresh.get(k)!=d.get(k) for k in keys) or fresh['market']['fee']!=d['market']['fee']:
         raise ExchangeError('Баланс, цена или комиссия изменились. Пересчитайте операцию.')
     if d['action']=='buy':
         funds=Client(v).balances()
@@ -131,16 +132,16 @@ def confirm(v,ident):
         d['funding_amount']=needed
         if not dec(fresh['market']['minimum']) <= dec(d['total']) <= dec(fresh['market']['max_quote']):
             raise ExchangeError('Изменились торговые лимиты. Пересчитайте покупку.')
-    if d['action']=='buy' and dec(d.get('funding_amount','0')):
+    if dec(d.get('funding_amount','0')):
         d['funding_id']=str(uuid.uuid4());d['funding_pending']=True
         reserve(j,'preview','ordering')
         try:
-            Client(v).fund_trading(d['funding_id'],d['funding_amount'])
+            Client(v).fund_trading(d['funding_id'],d['funding_amount'],*(['BNB'] if d['action']=='sell' else []))
             return save(j)
         except ExchangeRejected as e:
             if e.code==131210:
                 d['funding_pending']=False;d['funding_rejected']=e.code
-                return save(j,'closed','Bybit отклонил точность суммы перевода (131210). Покупка не отправлялась. Создайте новый расчёт.')
+                return save(j,'closed','Bybit отклонил точность суммы перевода (131210). Ордер не отправлялся. Создайте новый расчёт.')
             return save(j,error=str(e))
         except Exception as e:
             return save(j,error=str(e) if isinstance(e,ValueError) else 'Перевод не подтверждён. Проверяем статус; повтор запрещён.')
@@ -155,21 +156,25 @@ def reconcile(v,ident,withdraw_id=None):
     j=job(v,ident); d=j['data']; client=Client(v)
     try:
         if j['state']=='ordering' and d.get('funding_pending'):
-            status=client.funding_status(d['funding_id'],d['funding_amount'])
-            if status=='FAILED':return save(j,'closed','Внутренний перевод отклонён. Покупка не отправлялась.')
-            if status!='SUCCESS':return save(j,error='Ожидается подтверждение перевода USDT на торговый аккаунт.')
+            coin='BNB' if d['action']=='sell' else 'USDT'
+            status=client.funding_status(d['funding_id'],d['funding_amount'],*(['BNB'] if coin=='BNB' else []))
+            if status=='FAILED':return save(j,'closed','Внутренний перевод отклонён. Ордер не отправлялся.')
+            if status!='SUCCESS':return save(j,error=f'Ожидается подтверждение перевода {coin} на торговый аккаунт.')
             # A delayed transfer must not trigger a stale market purchase.
             if time.time()-j['created']>120:
-                return save(j,'closed','USDT переведены на торговый аккаунт. Расчёт истёк: создайте новую покупку.')
-            client.address_check(d['address'])
+                return save(j,'closed',f'{coin} переведены на торговый аккаунт. Расчёт истёк: создайте новый расчёт.')
+            if d['action']=='buy':client.address_check(d['address'])
             m=client.market()
-            if m['fee']!=d['market']['fee'] or not dec(m['minimum'])<=dec(d['total'])<=dec(m['max_quote']):
-                return save(j,'closed','USDT переведены. Торговые условия изменились: пересчитайте покупку.')
-            if dec(client.balances().get('USDT',0))<dec(d['total'])*(1+dec(m['fee'])):
+            quote=dec(d['quantity'])*dec(m['price']) if d['action']=='sell' else dec(d['total'])
+            invalid_sell=d['action']=='sell' and (dec(d['quantity'])>dec(m['max_base']) or round_step(dec(d['quantity']),m['base_step'])!=dec(d['quantity']))
+            if m['fee']!=d['market']['fee'] or invalid_sell or not dec(m['minimum'])<=quote<=dec(m['max_quote']):
+                return save(j,'closed',f'{coin} переведены. Торговые условия изменились: создайте новый расчёт.')
+            required=dec(d['quantity'] if d['action']=='sell' else d['total'])*(1+dec(m['fee']))
+            if dec(client.balances().get(coin,0))<required:
                 return save(j,error='Перевод подтверждён; ожидается доступный торговый баланс.')
             d['funding_pending']=False;d['funding_completed']=True
             reserve(j,'ordering','ordering') # Persist BEFORE the only order submission.
-            d['order_id']=client.order(ident,'buy',d['total'])
+            d['order_id']=client.order(ident,d['action'],d['quantity'] if d['action']=='sell' else d['total'])
             return save(j)
         if j['state']=='ordering':
             r=client.order_status(ident,d['action'],d.get('order_id')); d['execution']=r; d['order_id']=r['id']

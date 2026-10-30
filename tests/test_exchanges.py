@@ -142,6 +142,16 @@ class Adapter(unittest.TestCase):
  def test_gate_market_buy_quote_and_spot_only(self):
   c=self.client('gate');calls=[];c.request=lambda path,p,method:(calls.append(p) or {'id':'a'})
   c.order('abc','buy','50');self.assertEqual(calls[0]['amount'],'50');self.assertFalse(calls[0]['auto_borrow']);self.assertEqual(calls[0]['account'],'spot')
+ def test_bnb_transfer_payload_and_status_coin_match(self):
+  c=self.client('bybit');calls=[]
+  row=dict(transferId='id1',coin='BNB',amount='0.28',fromAccountType='FUND',toAccountType='UNIFIED',status='SUCCESS')
+  def request(path,params,*args):
+   calls.append((path,params,args));return {'list':[row]}
+  c.request=request;c.fund_trading('id1','0.28','BNB')
+  self.assertEqual(calls[-1][1]['coin'],'BNB');self.assertEqual(calls[-1][1]['fromAccountType'],'FUND')
+  self.assertEqual(c.funding_status('id1','0.28','BNB'),'SUCCESS')
+  row['coin']='USDT'
+  with self.assertRaises(ValueError):c.funding_status('id1','0.28','BNB')
  def test_signed_transports_exact_body_and_direct_proxy(self):
   for v in ['gate','bybit']:
    c=self.client(v);seen=[]
@@ -292,3 +302,45 @@ class ResponseFixtures(Adapter):
  def test_gate_failed_onchain_stays_unresolved(self):
   c=self.client('gate');c.request=lambda *a:[dict(id='1',currency='BNB',chain='BSC',address=ADDRESS,amount='0.1',status='FAIL')]
   r=c.history()[0];self.assertFalse(r['done']);self.assertFalse(r['failed'])
+
+class FundingSell(unittest.TestCase):
+ def setUp(self):
+  Workflow.setUp(self);self.trading='0';self.funding='0.2857939';self.transfers=[];self.state='PENDING'
+  self.f.balances=lambda:{'BNB':self.trading,'USDT':'0'}
+  self.f.funding_balances=lambda:{'BNB':self.funding}
+  def transfer(*args):
+   self.transfers.append(args)
+   raise clients.ExchangeError('Timeout')
+  self.f.fund_trading=transfer
+  self.f.funding_status=lambda *args:self.state
+ def start(self):
+  j=ex.preview('bybit',{'action':'sell'});ex.confirm('bybit',j['id']);return j
+ def test_deposit_transfers_before_sale_once(self):
+  j=self.start();self.assertEqual(self.transfers[0][1:],('0.2857939','BNB'))
+  ex.reconcile('bybit',j['id']);self.assertEqual(self.f.posts,[])
+  self.state='SUCCESS';self.trading=self.funding;self.funding='0'
+  ex.reconcile('bybit',j['id']);ex.reconcile('bybit',j['id'])
+  self.assertEqual(len(self.transfers),1);self.assertEqual(len(self.f.posts),1)
+  self.assertEqual(self.f.posts[0][2],'sell');self.assertEqual(ex.job('bybit',j['id'])['state'],'done')
+ def test_order_timeout_no_duplicate(self):
+  j=self.start();self.state='SUCCESS';self.trading=self.funding;self.f.timeout=True
+  ex.reconcile('bybit',j['id']);ex.reconcile('bybit',j['id'])
+  self.assertEqual(len(self.f.posts),1)
+ def test_failed_transfer_no_sale(self):
+  j=self.start();self.state='FAILED';self.assertEqual(ex.reconcile('bybit',j['id'])['state'],'closed');self.assertEqual(self.f.posts,[])
+ def test_expired_transfer_no_sale(self):
+  j=self.start();self.state='SUCCESS'
+  with patch('exchanges.time.time',return_value=j['created']+121):
+   self.assertEqual(ex.reconcile('bybit',j['id'])['state'],'closed')
+  self.assertEqual(self.f.posts,[])
+ def test_changed_funding_blocks_confirmation(self):
+  j=ex.preview('bybit',{'action':'sell'});self.funding='0.1'
+  with self.assertRaises(ValueError):ex.confirm('bybit',j['id'])
+  self.assertEqual(self.transfers,[])
+ def test_trading_only_sells_without_transfer(self):
+  self.trading=self.funding;self.funding='0';j=self.start()
+  self.assertEqual(self.transfers,[]);self.assertEqual(len(self.f.posts),1)
+ def test_small_deposit_no_transfer(self):
+  self.funding='0.00000001'
+  with self.assertRaises(ValueError):self.start()
+  self.assertEqual(self.transfers,[])

@@ -109,16 +109,18 @@ class Client:
             raise ExchangeError('Ожидается аккаунт финансирования Bybit FUND.')
         return {r['coin']:fmt(min(dec(r['transferBalance']),dec(r['walletBalance']))) for r in data['balance'] if r['coin'] in ('BNB','USDT')}
 
-    def fund_trading(self, ident, amount):
+    def fund_trading(self, ident, amount, coin="USDT"):
+        if coin not in ('USDT','BNB'):raise ExchangeError('Неверная монета перевода.')
         if self.venue!='bybit':raise ExchangeError('Перевод доступен только на Bybit.')
-        return self.request('/v5/asset/transfer/inter-transfer',dict(transferId=ident,coin='USDT',amount=amount,fromAccountType='FUND',toAccountType='UNIFIED'),'POST')
+        return self.request('/v5/asset/transfer/inter-transfer',dict(transferId=ident,coin=coin,amount=amount,fromAccountType='FUND',toAccountType='UNIFIED'),'POST')
 
-    def funding_status(self, ident, amount):
+    def funding_status(self, ident, amount, coin="USDT"):
+        if coin not in ('USDT','BNB'):raise ExchangeError('Неверная монета перевода.')
         if self.venue!='bybit':raise ExchangeError('Перевод доступен только на Bybit.')
-        rows=self.request('/v5/asset/transfer/query-inter-transfer-list',{'transferId':ident,'coin':'USDT'})['list']
+        rows=self.request('/v5/asset/transfer/query-inter-transfer-list',{'transferId':ident,'coin':coin})['list']
         r=one([r for r in rows if r.get('transferId')==ident])
-        if r['coin']!='USDT' or r['fromAccountType']!='FUND' or r['toAccountType']!='UNIFIED' or dec(r['amount'])!=dec(amount):
-            raise ExchangeError('Параметры внутреннего перевода не совпали. Покупка остановлена.')
+        if r['coin']!=coin or r['fromAccountType']!='FUND' or r['toAccountType']!='UNIFIED' or dec(r['amount'])!=dec(amount):
+            raise ExchangeError('Параметры внутреннего перевода не совпали. Торговля остановлена.')
         if r['status'] not in ('SUCCESS','FAILED','PENDING','STATUS_UNKNOWN'):
             raise ExchangeError('Неизвестный статус внутреннего перевода.')
         return r['status']

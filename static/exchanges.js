@@ -42,7 +42,7 @@ async function refreshVenueJobs(v){
  try{
  const r=await api('exchanges/'+v+'/jobs');
  const labels={ordering:'Проверка ордера',bought:'BNB куплен',withdrawing:'Вывод обрабатывается',done:'Завершено',closed:'Закрыто'};
- $(v+'-jobs').innerHTML=r.items.map(j=>`<div class="card"><strong>${escapeHtml(j.data.funding_pending?'Перевод USDT на торговый аккаунт':labels[j.state]||j.state)} · ${j.data.action==='sell'?'Продажа':'Покупка'}</strong><p>${escapeHtml(date(j.created))}</p>${j.data.execution?`<p>Исполнено: ${escapeHtml(j.data.execution.quantity)} BNB · ${escapeHtml(j.data.execution.quote)} USDT</p>`:''}${j.data.address?`<p class="mono">${escapeHtml(j.data.address)}</p>`:''}${j.data.withdrawal?`<p>Вывод: ${escapeHtml(j.data.withdrawal.status)}</p>`:''}${j.error?`<p class="negative">${escapeHtml(j.error)}</p>`:''}${['ordering','withdrawing'].includes(j.state)?`<button class="secondary" data-exchange="${v}" data-job="${j.id}" data-venue-action="check">Проверить статус</button>`:''}${v==='bybit'&&j.state==='withdrawing'&&!j.data.withdraw_id?` <button class="secondary" data-exchange="${v}" data-job="${j.id}" data-venue-action="link">Указать ID вывода</button>`:''}${j.state==='bought'?`<button class="withdraw-confirm" data-exchange="${v}" data-job="${j.id}" data-venue-action="withdraw-preview">Вывести BNB</button> <button class="secondary" data-exchange="${v}" data-job="${j.id}" data-venue-action="keep">Оставить на бирже</button>`:''}</div>`).join('')||'<p>Операций пока нет.</p>';
+ $(v+'-jobs').innerHTML=r.items.map(j=>`<div class="card"><strong>${escapeHtml(j.data.funding_pending?'Перевод '+(j.data.action==='sell'?'BNB':'USDT')+' на торговый аккаунт':labels[j.state]||j.state)} · ${j.data.action==='sell'?'Продажа':'Покупка'}</strong><p>${escapeHtml(date(j.created))}</p>${j.data.execution?`<p>Исполнено: ${escapeHtml(j.data.execution.quantity)} BNB · ${escapeHtml(j.data.execution.quote)} USDT</p>`:''}${j.data.address?`<p class="mono">${escapeHtml(j.data.address)}</p>`:''}${j.data.withdrawal?`<p>Вывод: ${escapeHtml(j.data.withdrawal.status)}</p>`:''}${j.error?`<p class="negative">${escapeHtml(j.error)}</p>`:''}${['ordering','withdrawing'].includes(j.state)?`<button class="secondary" data-exchange="${v}" data-job="${j.id}" data-venue-action="check">Проверить статус</button>`:''}${v==='bybit'&&j.state==='withdrawing'&&!j.data.withdraw_id?` <button class="secondary" data-exchange="${v}" data-job="${j.id}" data-venue-action="link">Указать ID вывода</button>`:''}${j.state==='bought'?`<button class="withdraw-confirm" data-exchange="${v}" data-job="${j.id}" data-venue-action="withdraw-preview">Вывести BNB</button> <button class="secondary" data-exchange="${v}" data-job="${j.id}" data-venue-action="keep">Оставить на бирже</button>`:''}</div>`).join('')||'<p>Операций пока нет.</p>';
  if(venueBusy[v])$('tab-'+v).querySelectorAll('button').forEach(b=>b.disabled=true);
  }catch(e){if(!$('tab-'+v).hidden)toast(e.message,true);}
 }
@@ -61,7 +61,7 @@ async function refreshVenue(v){
  }
  $(v+'-updated').textContent='Проверено: '+date(r.updated);
  $(v+'-warnings').textContent=r.warnings.join('\n');
- $(v+'-sell').dataset.unavailable=String(!binanceCanSellBnb(r.balances.BNB||'0'));
+ $(v+'-sell').dataset.unavailable=String(!binanceCanSellBnb(Number(r.balances.BNB||'0')+Number(v==='bybit'?r.funding_balances?.BNB||'0':0)));
  $(v+'-history').innerHTML=r.history.map(h=>`<p>${escapeHtml(h.amount)} BNB → <span class="mono">${escapeHtml(h.address)}</span> · ${escapeHtml(h.network)} · ${escapeHtml(h.status)}<br>ID: ${escapeHtml(h.id)}${/^0x[0-9a-fA-F]{64}$/.test(h.txid)?` · <a href="https://bscscan.com/tx/${h.txid}" target="_blank" rel="noopener noreferrer">Транзакция ↗</a>`:''}</p>`).join('')||'<p>Выводов в полученной истории нет.</p>';
  }catch(e){
  $(v+'-warnings').textContent='Не удалось обновить данные '+venueNames[v]+': '+e.message+' Ранее показанные балансы могут быть устаревшими.';
@@ -70,7 +70,7 @@ async function refreshVenue(v){
 }
 async function venueTrade(v,body){
  const j=await api('exchanges/'+v+'/preview','POST',body),d=j.data;
- const message=d.action==='sell'?`Продать BNB на ${venueNames[v]} по рынку?\nДоступно: ${d.available} BNB\nК продаже: ${d.quantity} BNB\nРезерв комиссии / округление: ${d.dust} BNB\nОжидается до комиссии: ${d.estimate} USDT`:
+ const message=d.action==='sell'?`Продать BNB на ${venueNames[v]} по рынку?\nДоступно всего: ${d.available} BNB\n${Number(d.funding_amount)>0?`Перед продажей перевести ${d.funding_amount} BNB: Финансирование → Единый торговый.\n`:''}К продаже: ${d.quantity} BNB\nРезерв комиссии / округление: ${d.dust} BNB\nОжидается до комиссии: ${d.estimate} USDT`:
  `Купить BNB на ${venueNames[v]}?\nЦель: ${d.amount} USDT\nСумма ордера: ${d.total} USDT\n${Number(d.funding_amount)>0?`Перед покупкой перевести ${d.funding_amount} USDT: Финансирование → Единый торговый (включая резерв комиссии).\n`:''}Торговая комиссия: ≈ ${Number(d.market.fee)*100}%\nОжидается после покупки: ${d.estimate} BNB\nКомиссия вывода: ${d.network.fee} BNB\nОценка получения с запасом комиссии: ${d.recipient_estimate} BNB\n\nBSC → ${d.address}\nВывод подтверждается отдельно. Итог зависит от цены исполнения.`;
  if(await uiConfirm(message)){await api('exchanges/'+v+'/'+j.id+'/confirm','POST',{});toast('Статус операции проверяется автоматически.');}
 }

@@ -8,7 +8,7 @@ const rows=[{exchange:'Binance',bnb:'0x'+'1'.repeat(40),usdt:''},{exchange:'Gate
 const ctx={$,appDialogBusy:false,loggedIn:true,setInterval(){},document:{createElement(){return {}; }},date:String,escapeHtml:s=>String(s).replaceAll('<','&lt;'),toast(){},
  binanceCanSellBnb:v=>Number(v)>=0.0001,uiConfirm:async()=>accepted,uiPrompt:async()=>null,confirmBinanceWithdrawal:async()=>accepted,
  api:async(path,method,body)=>{calls.push({path,method,body});if(path==='exchange-deposits')return {items:rows};if(path.endsWith('/jobs'))return {items:[]};
- if(path.endsWith('/refresh'))return {balances:{BNB:'0',USDT:'2'},funding_balances:{USDT:'170'},updated:1,warnings:[],history:[]};
+ if(path.endsWith('/refresh'))return {balances:{BNB:'0',USDT:'2'},funding_balances:{BNB:'0.28',USDT:'170'},updated:1,warnings:[],history:[]};
  if(path.endsWith('/preview'))return {id:'abc',data:{action:'buy',amount:'50',total:'50.1',market:{fee:'0.001'},network:{fee:'0.00001'},address:rows[0].bnb}};return {ok:true};}};
 vm.createContext(ctx);vm.runInContext(fs.readFileSync('static/exchanges.js','utf8'),ctx);
 (async()=>{
@@ -23,7 +23,7 @@ vm.createContext(ctx);vm.runInContext(fs.readFileSync('static/exchanges.js','utf
  calls=[];accepted=true;await ctx.venueTrade('gate',{action:'buy',amount:'50'});assert.equal(calls.filter(x=>x.path.endsWith('/confirm')).length,1);
  calls=[];await ctx.openVenueTab('bybit');
  assert.equal(calls.filter(x=>x.path==='exchanges/bybit/refresh').length,1);
- assert($('bybit-funding').textContent.includes('170'));
+ assert($('bybit-funding').textContent.includes('170'));assert.equal($('bybit-sell').dataset.unavailable,'false');
  assert(calls.some(x=>x.path==='exchanges/bybit/jobs'));
  calls=[];await Promise.all([ctx.openVenueTab('gate'),ctx.openVenueTab('gate')]);
  assert.equal(calls.filter(x=>x.path==='exchanges/gate/refresh').length,1);
