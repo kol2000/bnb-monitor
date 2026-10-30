@@ -104,6 +104,20 @@ class Client:
             raise ExchangeError('Ожидается аккаунт финансирования Bybit FUND.')
         return {r['coin']:fmt(min(dec(r['transferBalance']),dec(r['walletBalance']))) for r in data['balance'] if r['coin'] in ('BNB','USDT')}
 
+    def fund_trading(self, ident, amount):
+        if self.venue!='bybit':raise ExchangeError('Перевод доступен только на Bybit.')
+        return self.request('/v5/asset/transfer/inter-transfer',dict(transferId=ident,coin='USDT',amount=amount,fromAccountType='FUND',toAccountType='UNIFIED'),'POST')
+
+    def funding_status(self, ident, amount):
+        if self.venue!='bybit':raise ExchangeError('Перевод доступен только на Bybit.')
+        rows=self.request('/v5/asset/transfer/query-inter-transfer-list',{'transferId':ident,'coin':'USDT'})['list']
+        r=one([r for r in rows if r.get('transferId')==ident])
+        if r['coin']!='USDT' or r['fromAccountType']!='FUND' or r['toAccountType']!='UNIFIED' or dec(r['amount'])!=dec(amount):
+            raise ExchangeError('Параметры внутреннего перевода не совпали. Покупка остановлена.')
+        if r['status'] not in ('SUCCESS','FAILED','PENDING','STATUS_UNKNOWN'):
+            raise ExchangeError('Неизвестный статус внутреннего перевода.')
+        return r['status']
+
     def network(self):
         if self.venue=='gate':
             rows=self.request('/wallet/currency_chains',{'currency':'BNB'},signed=False)
@@ -249,5 +263,5 @@ def validated(fn):
         except (KeyError,TypeError,IndexError):
             raise ExchangeError('Биржа вернула неполные данные ('+fn.__name__+'). Операция остановлена.') from None
     return wrapped
-for _name in ('balances','network','market','address_check','order_status','history'):
+for _name in ('funding_balances','funding_status','balances','network','market','address_check','order_status','history'):
     setattr(Client,_name,validated(getattr(Client,_name)))

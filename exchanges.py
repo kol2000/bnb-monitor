@@ -62,6 +62,15 @@ def address(value):
         raise ExchangeError('Введите полный адрес BSC (0x…).')
     return value # Bybit address book is case sensitive.
 
+def funding_needed(v, client, available, required):
+    shortage=max(Decimal(0),required-dec(available))
+    if not shortage:return '0'
+    if v!='bybit':raise ExchangeError('Недостаточно свободных USDT с резервом комиссии.')
+    amount=round_step(shortage,'0.000001',True)
+    if dec(client.funding_balances().get('USDT',0))<amount:
+        raise ExchangeError('Недостаточно USDT на торговом аккаунте и финансировании с резервом комиссии.')
+    return fmt(amount)
+
 def plan(v,body):
     client=Client(v); action=body.get('action','buy')
     if action not in ('buy','sell'):raise ExchangeError('Неизвестная операция.')
@@ -84,11 +93,11 @@ def plan(v,body):
         reserve=2*dec(n['fee']) if goal=='wallet' else Decimal(0)
         total=round_step((amount+reserve*price)/(1-rate),m['quote_step'],True)
         # Reserve fee also if charged in USDT. Never borrow to fill a market order.
-        if dec(a.get('USDT',0))<total*(1+rate):raise ExchangeError('Недостаточно свободных USDT с резервом комиссии.')
+        funding=funding_needed(v,client,a.get('USDT',0),total*(1+rate))
         received=total*(1-rate)/price
         if received-dec(n['fee'])<dec(n['minimum']):raise ExchangeError('Сумма покупки меньше минимума последующего вывода.')
         quote_amount=total
-        data=dict(action=action,goal=goal,amount=fmt(amount),total=fmt(total),estimate=fmt(received),
+        data=dict(action=action,goal=goal,funding_amount=funding,amount=fmt(amount),total=fmt(total),estimate=fmt(received),
             recipient_estimate=fmt(max(Decimal(0),received-2*dec(n['fee']))),address=target,network=n,market=m)
     if quote_amount<dec(m['minimum']) or quote_amount>dec(m['max_quote']):raise ExchangeError('Стоимость вне лимитов рыночного ордера.')
     return data
@@ -115,10 +124,20 @@ def confirm(v,ident):
         raise ExchangeError('Баланс, цена или комиссия изменились. Пересчитайте операцию.')
     if d['action']=='buy':
         funds=Client(v).balances()
-        if dec(funds.get('USDT',0)) < dec(d['total'])*(1+dec(d['market']['fee'])):
-            raise ExchangeError('Недостаточно USDT для согласованной суммы.')
+        needed=funding_needed(v,Client(v),funds.get('USDT',0),dec(d['total'])*(1+dec(d['market']['fee'])))
+        if dec(needed)>dec(d.get('funding_amount','0')):
+            raise ExchangeError('Нужна большая сумма перевода с финансирования. Пересчитайте покупку.')
+        d['funding_amount']=needed
         if not dec(fresh['market']['minimum']) <= dec(d['total']) <= dec(fresh['market']['max_quote']):
             raise ExchangeError('Изменились торговые лимиты. Пересчитайте покупку.')
+    if d['action']=='buy' and dec(d.get('funding_amount','0')):
+        d['funding_id']=str(uuid.uuid4());d['funding_pending']=True
+        reserve(j,'preview','ordering')
+        try:
+            Client(v).fund_trading(d['funding_id'],d['funding_amount'])
+            return save(j)
+        except Exception as e:
+            return save(j,error=str(e) if isinstance(e,ValueError) else 'Перевод не подтверждён. Проверяем статус; повтор запрещён.')
     reserve(j,'preview','ordering')
     try:
         d['order_id']=Client(v).order(ident,d['action'],d['quantity'] if d['action']=='sell' else d['total'])
@@ -129,6 +148,23 @@ def confirm(v,ident):
 def reconcile(v,ident,withdraw_id=None):
     j=job(v,ident); d=j['data']; client=Client(v)
     try:
+        if j['state']=='ordering' and d.get('funding_pending'):
+            status=client.funding_status(d['funding_id'],d['funding_amount'])
+            if status=='FAILED':return save(j,'closed','Внутренний перевод отклонён. Покупка не отправлялась.')
+            if status!='SUCCESS':return save(j,error='Ожидается подтверждение перевода USDT на торговый аккаунт.')
+            # A delayed transfer must not trigger a stale market purchase.
+            if time.time()-j['created']>120:
+                return save(j,'closed','USDT переведены на торговый аккаунт. Расчёт истёк: создайте новую покупку.')
+            client.address_check(d['address'])
+            m=client.market()
+            if m['fee']!=d['market']['fee'] or not dec(m['minimum'])<=dec(d['total'])<=dec(m['max_quote']):
+                return save(j,'closed','USDT переведены. Торговые условия изменились: пересчитайте покупку.')
+            if dec(client.balances().get('USDT',0))<dec(d['total'])*(1+dec(m['fee'])):
+                return save(j,error='Перевод подтверждён; ожидается доступный торговый баланс.')
+            d['funding_pending']=False;d['funding_completed']=True
+            reserve(j,'ordering','ordering') # Persist BEFORE the only order submission.
+            d['order_id']=client.order(ident,'buy',d['total'])
+            return save(j)
         if j['state']=='ordering':
             r=client.order_status(ident,d['action'],d.get('order_id')); d['execution']=r; d['order_id']=r['id']
             if not r['terminal']:return save(j)

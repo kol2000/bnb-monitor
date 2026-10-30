@@ -167,6 +167,52 @@ class Adapter(unittest.TestCase):
    with self.assertRaises(ValueError):clients.Client('gate')
   finally:p.unlink()
 
+class FundingWorkflow(unittest.TestCase):
+ preview=Workflow.preview
+ def setUp(self):
+  Workflow.setUp(self);self.f.free='0';self.transfers=[];self.transfer_state='PENDING'
+  self.f.funding_balances=lambda:{'USDT':'172.8519'}
+  def transfer(i,a):
+   self.transfers.append((i,a))
+   raise clients.ExchangeError('Timeout')
+  self.f.fund_trading=transfer
+  self.f.funding_status=lambda *a:self.transfer_state
+ def test_transfer_timeout_reconciles_before_one_order(self):
+  j=self.preview('bybit')
+  self.assertGreater(Decimal(j['data']['funding_amount']),50)
+  self.assertEqual(self.transfers,[])
+  ex.confirm('bybit',j['id']);ex.reconcile('bybit',j['id'])
+  self.assertEqual(len(self.transfers),1);self.assertEqual(self.f.posts,[])
+  with self.assertRaises(ValueError):ex.confirm('bybit',j['id'])
+  self.transfer_state='SUCCESS';self.f.free='1000'
+  ex.reconcile('bybit',j['id']);ex.reconcile('bybit',j['id'])
+  self.assertEqual(len(self.transfers),1);self.assertEqual(len(self.f.posts),1)
+  self.assertEqual(ex.job('bybit',j['id'])['state'],'bought')
+ def test_order_timeout_after_transfer_is_not_resubmitted(self):
+  j=self.preview('bybit');ex.confirm('bybit',j['id'])
+  self.transfer_state='SUCCESS';self.f.free='1000';self.f.timeout=True
+  ex.reconcile('bybit',j['id']);ex.reconcile('bybit',j['id'])
+  self.assertEqual(len(self.transfers),1);self.assertEqual(len(self.f.posts),1)
+ def test_only_shortfall_and_reservation_blocks_other_job(self):
+  self.f.free='20';j=self.preview('bybit')
+  required=Decimal(j['data']['total'])*(1+Decimal(j['data']['market']['fee']))
+  self.assertLess(abs(Decimal(j['data']['funding_amount'])-(required-20)),Decimal('0.000001'))
+  other=self.preview('bybit');ex.confirm('bybit',j['id'])
+  with self.assertRaises(ValueError):ex.confirm('bybit',other['id'])
+  self.assertEqual(len(self.transfers),1)
+ def test_failed_transfer_never_buys(self):
+  j=self.preview('bybit');ex.confirm('bybit',j['id']);self.transfer_state='FAILED'
+  self.assertEqual(ex.reconcile('bybit',j['id'])['state'],'closed');self.assertEqual(self.f.posts,[])
+ def test_expired_success_does_not_buy(self):
+  j=self.preview('bybit');ex.confirm('bybit',j['id']);self.transfer_state='SUCCESS'
+  with patch('exchanges.time.time',return_value=j['created']+121):
+   self.assertEqual(ex.reconcile('bybit',j['id'])['state'],'closed')
+  self.assertEqual(self.f.posts,[])
+ def test_insufficient_funding_no_transfer(self):
+  self.f.funding_balances=lambda:{'USDT':'1'}
+  with self.assertRaises(ValueError):self.preview('bybit')
+  self.assertEqual(self.transfers,[])
+
 class DepositSettings(unittest.TestCase):
  def test_separate_venues_and_assets(self):
   cfg=dict(wd.DEFAULTS,withdraw_gate_destination=ADDRESS,withdraw_bybit_destination='0x'+'2'*40,withdraw_gate_usdt_destination='0x'+'3'*40)
