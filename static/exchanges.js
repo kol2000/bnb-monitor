@@ -46,7 +46,13 @@ async function refreshVenueJobs(v){
  if(venueBusy[v])$('tab-'+v).querySelectorAll('button').forEach(b=>b.disabled=true);
  }catch(e){if(!$('tab-'+v).hidden)toast(e.message,true);}
 }
+async function openVenueTab(v){
+ if(!loggedIn)return;
+ return venueAction(v,()=>refreshVenue(v));
+}
 async function refreshVenue(v){
+ $(v+'-warnings').textContent='Обновляем баланс и историю '+venueNames[v]+'…';
+ try{
  const r=await api('exchanges/'+v+'/refresh','POST',{});
  $(v+'-balances').textContent=`${v==='bybit'?'Единый торговый — доступно':'Доступно'}: ${r.balances.BNB||'0'} BNB · ${r.balances.USDT||'0'} USDT`;
  if(v==='bybit'){
@@ -57,6 +63,10 @@ async function refreshVenue(v){
  $(v+'-warnings').textContent=r.warnings.join('\n');
  $(v+'-sell').dataset.unavailable=String(!binanceCanSellBnb(r.balances.BNB||'0'));
  $(v+'-history').innerHTML=r.history.map(h=>`<p>${escapeHtml(h.amount)} BNB → <span class="mono">${escapeHtml(h.address)}</span> · ${escapeHtml(h.network)} · ${escapeHtml(h.status)}<br>ID: ${escapeHtml(h.id)}${/^0x[0-9a-fA-F]{64}$/.test(h.txid)?` · <a href="https://bscscan.com/tx/${h.txid}" target="_blank" rel="noopener noreferrer">Транзакция ↗</a>`:''}</p>`).join('')||'<p>Выводов в полученной истории нет.</p>';
+ }catch(e){
+ $(v+'-warnings').textContent='Не удалось обновить данные '+venueNames[v]+': '+e.message+' Ранее показанные балансы могут быть устаревшими.';
+ throw e;
+ }
 }
 async function venueTrade(v,body){
  const j=await api('exchanges/'+v+'/preview','POST',body),d=j.data;

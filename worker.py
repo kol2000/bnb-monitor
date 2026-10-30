@@ -1,4 +1,6 @@
 import json
+import errno
+import sqlite3
 from decimal import Decimal, InvalidOperation
 import signal
 import threading
@@ -302,6 +304,26 @@ def email_loop():
             set_status(email_error='Ошибка очереди email. Проверьте диск и перезапустите worker.')
         stop.wait(2)
 
+def monitoring_error(stage, exc):
+    # Never expose exception text: it can contain URLs, tokens or SQL values.
+    if isinstance(exc, OSError) and exc.errno == errno.ENOSPC:
+        cause = 'на диске нет свободного места'
+    elif isinstance(exc, PermissionError):
+        cause = 'нет прав доступа к файлу или каталогу'
+    elif isinstance(exc, sqlite3.Error):
+        code = getattr(exc, 'sqlite_errorcode', 0) or 0
+        cause = {sqlite3.SQLITE_FULL: 'нет места для записи в базу данных',
+                 sqlite3.SQLITE_BUSY: 'база данных занята',
+                 sqlite3.SQLITE_LOCKED: 'база данных заблокирована',
+                 sqlite3.SQLITE_READONLY: 'база данных доступна только для чтения',
+                 sqlite3.SQLITE_CORRUPT: 'повреждена база данных'}.get(
+                     code & 255, 'ошибка доступа или записи в базу данных')
+    elif isinstance(exc, (TimeoutError, ConnectionError)):
+        cause = 'тайм-аут или ошибка сетевого соединения'
+    else:
+        cause = 'внутренняя ошибка обработки данных (' + type(exc).__name__ + ')'
+    return f'{stage}: {cause}. Цикл прерван; фоновый процесс повторит проверку автоматически.'
+
 def run():
     # One worker per database; prevent accidental duplicate notification workers.
     import fcntl
@@ -325,12 +347,15 @@ def run():
         while not stop.is_set():
             heartbeat()
             set_status(worker_seen=time.time())
+            stage = 'Чтение настроек мониторинга'
             try:
                 cfg = settings()
                 if time.time() >= next_price:
+                    stage = 'Обновление курса BNB (CoinMarketCap)'
                     refresh_price()
                     next_price = time.time() + 300
                     heartbeat()
+                stage = 'Подготовка синхронизации Google Таблицы'
                 source = (cfg['sheets_enabled'], cfg['sheets_id'], cfg['sheets_tab'], cfg['sheets_interval'])
                 if source != previous_source:
                     next_sync = 0
@@ -338,20 +363,23 @@ def run():
                 with db() as c:
                     sync_request = c.execute("SELECT value FROM status WHERE key='sheets_requested'").fetchone()
                 if cfg['sheets_enabled'] and (time.time() >= next_sync or (sync_request and sync_request['value'] == 'true')):
+                    stage = 'Импорт кошельков из Google Таблицы'
                     sync_once()
                     next_sync = time.time() + cfg['sheets_interval']
                     heartbeat()
+                stage = 'Чтение очереди проверки балансов'
                 with db() as c:
                     row = c.execute("SELECT value FROM status WHERE key='check_requested'").fetchone()
                 if time.time() >= next_check or (row and row['value'] == 'true'):
                     cycle_started = time.time()
+                    stage = 'Проверка балансов BNB / USDT в сети BSC'
                     check_once()
                     if not stop.is_set():
+                        stage = 'Запись балансов в Google Таблицу'
                         export_balances(cycle_started)
                     next_check = time.time() + settings()['interval']
-            except Exception:
-                # Do not log exceptions containing credentials or network URLs.
-                set_status(error='Внутренняя ошибка мониторинга. Проверьте диск и перезапустите worker.', running=False)
+            except Exception as exc:
+                set_status(error=monitoring_error(stage, exc), running=False)
                 next_check = time.time() + 30
             stop.wait(2)
 
