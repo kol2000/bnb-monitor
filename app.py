@@ -381,6 +381,7 @@ def state():
         health['stale' if w['stale'] else 'fresh'] += 1
         w['bnb'] = bnb(w['balance']) if w['balance'] is not None else None
         w['usd'] = usd(w['balance'], price)
+        w['bnb_at_least_dollar'] = bool(w['balance'] is not None and price and Decimal(w['balance']) * Decimal(str(price)) >= Decimal(10)**18)
         w['usdt'] = bnb(w['usdt_balance']) if w['usdt_balance'] is not None else None
     for e in events:
         e.update(delta_bnb=bnb(e['delta']), new_bnb=bnb(e['new']))

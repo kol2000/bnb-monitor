@@ -62,7 +62,7 @@ async function refreshVenue(v){
  $(v+'-updated').textContent='Проверено: '+date(r.updated);
  $(v+'-warnings').textContent=r.warnings.join('\n');
  $(v+'-sell').dataset.unavailable=String(!binanceCanSellBnb(Number(r.balances.BNB||'0')+Number(v==='bybit'?r.funding_balances?.BNB||'0':0)));
- $(v+'-history').innerHTML=r.history.map(h=>`<p>${escapeHtml(h.amount)} BNB → <span class="mono">${escapeHtml(h.address)}</span> · ${escapeHtml(h.network)} · ${escapeHtml(h.status)}<br>ID: ${escapeHtml(h.id)}${/^0x[0-9a-fA-F]{64}$/.test(h.txid)?` · <a href="https://bscscan.com/tx/${h.txid}" target="_blank" rel="noopener noreferrer">Транзакция ↗</a>`:''}</p>`).join('')||'<p>Выводов в полученной истории нет.</p>';
+ $(v+'-history').innerHTML=r.history.map(h=>`<tr><td>${escapeHtml(h.created?date(Number(h.created)>1e12?Number(h.created)/1000:Number(h.created)):'—')}</td><td>${escapeHtml(h.amount)} BNB</td><td><span class="mono">${escapeHtml(h.address)}</span><small>${escapeHtml(h.network)}</small></td><td>${escapeHtml(h.status)}<small>ID: ${escapeHtml(h.id)}</small>${/^0x[0-9a-fA-F]{64}$/.test(h.txid)?`<a href="https://bscscan.com/tx/${h.txid}" target="_blank" rel="noopener noreferrer">Транзакция ↗</a>`:''}</td></tr>`).join('')||'<tr><td colspan="4">Выводов в полученной истории нет.</td></tr>';
  }catch(e){
  $(v+'-warnings').textContent='Не удалось обновить данные '+venueNames[v]+': '+e.message+' Ранее показанные балансы могут быть устаревшими.';
  throw e;

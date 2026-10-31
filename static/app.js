@@ -92,11 +92,9 @@ try {
 } catch {}
 function matchesBalanceFilter(w) {
   if (!hideSmallBalances) return true;
-  // The server marks positive amounts below one cent before rounding USD.
-  // Unknown balances/quotes cannot establish that a wallet meets the threshold.
-  if (usdtEnabled && w.usdt_balance != null && BigInt(w.usdt_balance) >= 10000000000000000n) return true;
-  return w.balance != null && BigInt(w.balance) > 0n
-    && typeof w.usd === 'string' && w.usd.startsWith('$') && w.usd !== '$0.00';
+  // Compare raw token units and unrounded server-side BNB valuation.
+  if (usdtEnabled && w.usdt_balance != null && BigInt(w.usdt_balance) >= 1000000000000000000n) return true;
+  return w.bnb_at_least_dollar === true;
 }
 function compareWallets(a, b) {
   const nameOrder = String(a.name || a.address).localeCompare(String(b.name || b.address), 'ru', {sensitivity:'base'});

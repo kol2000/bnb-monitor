@@ -1,33 +1,33 @@
 #binance-balances{white-space:pre-line;font-size:18px;line-height:1.9}.binance-address{overflow-wrap:anywhere;word-break:break-word}.binance-job{padding:18px 0;border-bottom:1px solid var(--line)}.binance-job:last-child{border-bottom:0}#tab-binance>.card,#tab-binance>.settings-grid{margin-bottom:20px}#binance-network{display:block;width:100%;padding:12px;margin-top:8px;background:var(--surface);color:var(--text);border:1px solid var(--line);border-radius:9px}.tabs{overflow-x:auto;white-space:nowrap}
 
 /* Prominent exchange actions in both light and dark themes. */
-#tab-binance #binance-sell {
+:is(#binance-sell,#gate-sell,#bybit-sell) {
   background: var(--yellow);
   color: #15191e;
   border-color: transparent;
   font-weight: 600;
 }
-#tab-binance #binance-sell:hover:not(:disabled) {
+:is(#binance-sell,#gate-sell,#bybit-sell):hover:not(:disabled) {
   background: var(--yellow);
   filter: brightness(1.12);
 }
-#tab-binance button[data-binance-check] {
+:is(button[data-binance-check],button[data-venue-action="check"]) {
   background: #2563eb;
   color: #ffffff;
   border-color: #1d4ed8;
   font-weight: 700;
 }
-#tab-binance button[data-binance-check]:hover:not(:disabled) {
+:is(button[data-binance-check],button[data-venue-action="check"]):hover:not(:disabled) {
   background: #1d4ed8;
   filter: none;
 }
-#tab-binance #binance-sell:focus-visible,
-#tab-binance button[data-binance-check]:focus-visible {
+:is(#binance-sell,#gate-sell,#bybit-sell):focus-visible,
+:is(button[data-binance-check],button[data-venue-action="check"]):focus-visible {
   outline: 3px solid #60a5fa;
   outline-offset: 3px;
 }
 
-#tab-binance #binance-sell[data-sell-unavailable="true"] {
+:is(#binance-sell[data-sell-unavailable="true"],#gate-sell[data-unavailable="true"],#bybit-sell[data-unavailable="true"]) {
   background: #4b5563;
   color: #e5e7eb;
   border-color: #6b7280;
@@ -35,8 +35,18 @@
   cursor: not-allowed;
   filter: none;
 }
-[data-theme="light"] #tab-binance #binance-sell[data-sell-unavailable="true"] {
+[data-theme="light"] :is(#binance-sell[data-sell-unavailable="true"],#gate-sell[data-unavailable="true"],#bybit-sell[data-unavailable="true"]) {
   background: #e5e7eb;
   color: #4b5563;
   border-color: #9ca3af;
 }
+
+
+/* Shared exchange layout, including native selects and balance typography. */
+:is(#tab-binance,#tab-gate,#tab-bybit)>.card,
+:is(#tab-binance,#tab-gate,#tab-bybit)>.settings-grid{margin-bottom:20px}
+:is(#tab-binance,#tab-gate,#tab-bybit) form select{display:block;width:100%;padding:12px;margin-top:8px;background:var(--surface);color:var(--text);border:1px solid var(--line);border-radius:9px;font:14px system-ui}
+:is(#gate-balances,#bybit-balances,#bybit-funding){font-size:18px;line-height:1.9;white-space:pre-line}
+:is(#gate-jobs,#bybit-jobs)>.card{padding:18px 0;border:0;border-bottom:1px solid var(--line);border-radius:0}
+:is(#gate-jobs,#bybit-jobs)>.card:last-child{border-bottom:0}
+:is(#gate-history,#bybit-history) .mono{overflow-wrap:anywhere}

@@ -47,3 +47,11 @@ assert(completed.includes('Последний вывод завершён'));
 assert(!completed.includes('disabled'));
 assert(context.walletWithdrawalControl({...row,checked:101,error:'timeout'}).includes('disabled'));
 console.log('Completed withdrawals remain visible until and after balance refresh: OK');
+
+vm.runInContext('let hideSmallBalances=true;\n'+source.slice(source.indexOf('function matchesBalanceFilter'),source.indexOf('function compareWallets')),context);
+assert(!context.matchesBalanceFilter({usdt_balance:'999999999999999999',bnb_at_least_dollar:false,usd:'$1.00'}));
+assert(context.matchesBalanceFilter({usdt_balance:'1000000000000000000',bnb_at_least_dollar:false}));
+assert(context.matchesBalanceFilter({usdt_balance:'0',bnb_at_least_dollar:true}));
+assert(!context.matchesBalanceFilter({usdt_balance:null,bnb_at_least_dollar:false}));
+context.usdtEnabled=false;assert(!context.matchesBalanceFilter({usdt_balance:'2000000000000000000',bnb_at_least_dollar:false}));
+console.log('One-dollar wallet filter boundaries: OK');
