@@ -12,6 +12,11 @@ const ctx={$,appDialogBusy:false,loggedIn:true,setInterval(){},document:{createE
  if(path.endsWith('/preview'))return {id:'abc',data:{action:'buy',amount:'50',total:'50.1',market:{fee:'0.001'},network:{fee:'0.00001'},address:rows[0].bnb}};return {ok:true};}};
 vm.createContext(ctx);vm.runInContext(fs.readFileSync('static/exchanges.js','utf8'),ctx);
 (async()=>{
+ const amounts=ctx.venueAmounts({action:'sell',funding_id:'x',funding_amount:'0.28',funding_completed:true,quantity:'0.279',withdraw_plan:{amount:'0.1',fee:'0.0002'},withdrawal:{amount:'0.1'}});
+ assert(amounts.includes('0.28 BNB'));assert(amounts.includes('перевод подтверждён'));assert(amounts.includes('0.279 BNB'));assert(amounts.includes('0.0002 BNB'));
+ assert(ctx.venueAmounts({action:'buy',funding_id:'x',funding_amount:'112.69'}).includes('112.69 USDT'));
+ assert(!ctx.venueAmounts({action:'buy',funding_amount:'112.69'}).includes('Финансирование'));
+ assert.equal(ctx.venueAmounts({}), '');
  await ctx.loadExchangeDeposits();assert.equal($('withdraw-binance-destination').value,rows[0].bnb);
  $('deposit-exchange').value='Gate';$('deposit-exchange').onchange();assert.equal($('withdraw-binance-destination').value,rows[1].bnb);
  calls=[];await $('withdrawal-form').onsubmit({preventDefault(){}});assert(!calls.some(x=>x.method==='POST'));

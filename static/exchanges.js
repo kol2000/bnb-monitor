@@ -37,12 +37,27 @@ async function venueAction(v,fn){
  const tab=$('tab-'+v);tab.querySelectorAll('button').forEach(b=>b.disabled=true);
  try{await fn();}catch(e){toast(e.message,true);}finally{venueBusy[v]=false;tab.querySelectorAll('button').forEach(b=>b.disabled=b.dataset.unavailable==='true');await refreshVenueJobs(v);}
 }
+function venueAmounts(d){
+ const lines=[];
+ if(d.funding_id && d.funding_amount){
+  const coin=d.action==='sell'?'BNB':'USDT';
+  lines.push('Финансирование → торговый аккаунт: '+escapeHtml(d.funding_amount)+' '+coin+' · '+(d.funding_completed?'перевод подтверждён':d.funding_rejected?'перевод отклонён':'сумма заявки'));
+ }
+ if(d.action==='sell' && d.quantity)lines.push('К продаже по расчёту: '+escapeHtml(d.quantity)+' BNB');
+ if(d.action==='buy' && d.total)lines.push('Сумма ордера по расчёту: '+escapeHtml(d.total)+' USDT');
+ if(d.withdraw_plan){
+  lines.push('На кошелёк · сумма заявки: '+escapeHtml(d.withdraw_plan.amount)+' BNB');
+  lines.push('Комиссия вывода по расчёту: '+escapeHtml(d.withdraw_plan.fee)+' BNB');
+ }
+ if(d.withdrawal?.amount!=null)lines.push('Сумма вывода по данным биржи: '+escapeHtml(d.withdrawal.amount)+' BNB');
+ return lines.length?'<p>'+lines.join('<br>')+'</p>':'';
+}
 async function refreshVenueJobs(v){
  if(!loggedIn)return;
  try{
  const r=await api('exchanges/'+v+'/jobs');
  const labels={ordering:'Проверка ордера',bought:'BNB куплен',withdrawing:'Вывод обрабатывается',done:'Завершено',closed:'Закрыто'};
- $(v+'-jobs').innerHTML=r.items.map(j=>`<div class="card"><strong>${escapeHtml(j.data.funding_pending?'Перевод '+(j.data.action==='sell'?'BNB':'USDT')+' на торговый аккаунт':labels[j.state]||j.state)} · ${j.data.action==='sell'?'Продажа':'Покупка'}</strong><p>${escapeHtml(date(j.created))}</p>${j.data.execution?`<p>Исполнено: ${escapeHtml(j.data.execution.quantity)} BNB · ${escapeHtml(j.data.execution.quote)} USDT</p>`:''}${j.data.address?`<p class="mono">${escapeHtml(j.data.address)}</p>`:''}${j.data.withdrawal?`<p>Вывод: ${escapeHtml(j.data.withdrawal.status)}</p>`:''}${j.error?`<p class="negative">${escapeHtml(j.error)}</p>`:''}${['ordering','withdrawing'].includes(j.state)?`<button class="secondary" data-exchange="${v}" data-job="${j.id}" data-venue-action="check">Проверить статус</button>`:''}${v==='bybit'&&j.state==='withdrawing'&&!j.data.withdraw_id?` <button class="secondary" data-exchange="${v}" data-job="${j.id}" data-venue-action="link">Указать ID вывода</button>`:''}${j.state==='bought'?`<button class="withdraw-confirm" data-exchange="${v}" data-job="${j.id}" data-venue-action="withdraw-preview">Вывести BNB</button> <button class="secondary" data-exchange="${v}" data-job="${j.id}" data-venue-action="keep">Оставить на бирже</button>`:''}</div>`).join('')||'<p>Операций пока нет.</p>';
+ $(v+'-jobs').innerHTML=r.items.map(j=>`<div class="card"><strong>${escapeHtml(j.data.funding_pending?'Перевод '+(j.data.action==='sell'?'BNB':'USDT')+' на торговый аккаунт':labels[j.state]||j.state)} · ${j.data.action==='sell'?'Продажа':'Покупка'}</strong><p>${escapeHtml(date(j.created))}</p>${venueAmounts(j.data)}${j.data.execution?`<p>Исполнено: ${escapeHtml(j.data.execution.quantity)} BNB · ${escapeHtml(j.data.execution.quote)} USDT</p>`:''}${j.data.address?`<p class="mono">${escapeHtml(j.data.address)}</p>`:''}${j.data.withdrawal?`<p>Вывод: ${escapeHtml(j.data.withdrawal.status)}</p>`:''}${j.error?`<p class="negative">${escapeHtml(j.error)}</p>`:''}${['ordering','withdrawing'].includes(j.state)?`<button class="secondary" data-exchange="${v}" data-job="${j.id}" data-venue-action="check">Проверить статус</button>`:''}${v==='bybit'&&j.state==='withdrawing'&&!j.data.withdraw_id?` <button class="secondary" data-exchange="${v}" data-job="${j.id}" data-venue-action="link">Указать ID вывода</button>`:''}${j.state==='bought'?`<button class="withdraw-confirm" data-exchange="${v}" data-job="${j.id}" data-venue-action="withdraw-preview">Вывести BNB</button> <button class="secondary" data-exchange="${v}" data-job="${j.id}" data-venue-action="keep">Оставить на бирже</button>`:''}</div>`).join('')||'<p>Операций пока нет.</p>';
  if(venueBusy[v])$('tab-'+v).querySelectorAll('button').forEach(b=>b.disabled=true);
  }catch(e){if(!$('tab-'+v).hidden)toast(e.message,true);}
 }
