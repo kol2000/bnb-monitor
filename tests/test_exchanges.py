@@ -29,7 +29,7 @@ class Fake:
   self.posts.append(('withdraw',i,a,n));self.wtime=time.time()
   if self.timeout:raise clients.ExchangeError('Timeout')
   return 'withdraw1'
- def history(self,ident=None,withdraw_id=None):
+ def history(self,ident=None,withdraw_id=None,start=None):
   n=self.posts[-1][-1]
   return [dict(id='withdraw1',request_id=ident,coin='BNB',network='ETH' if self.mismatch else 'BSC',address=ADDRESS,amount=n,
    status='success',txid='0x'+'a'*64,created=str(int(self.wtime*1000)),done=True,failed=False)]
@@ -93,6 +93,28 @@ class Workflow(unittest.TestCase):
   j=self.bought('bybit');ex.withdraw_preview('bybit',j['id']);self.f.timeout=True;ex.withdraw_confirm('bybit',j['id'])
   self.assertEqual(ex.reconcile('bybit',j['id'])['state'],'withdrawing')
   self.assertEqual(ex.reconcile('bybit',j['id'],'withdraw1')['state'],'done');self.assertEqual(len(self.f.posts),2)
+ def test_recovery_candidates_do_not_resend_or_finish(self):
+  j=self.bought('bybit');ex.withdraw_preview('bybit',j['id']);self.f.timeout=True;ex.withdraw_confirm('bybit',j['id'])
+  r=ex.reconcile('bybit',j['id']);self.assertEqual(r['state'],'withdrawing')
+  self.assertEqual(r['data']['recovery_candidates'][0]['id'],'withdraw1')
+  self.assertGreater(r['data']['last_checked'],0)
+  self.assertEqual(len(self.f.posts),2)
+  self.assertEqual(ex.reconcile('bybit',j['id'],'withdraw1')['state'],'done')
+  self.assertEqual(len(self.f.posts),2)
+ def test_recovery_rejects_wrong_network_and_old_record(self):
+  j=self.bought('bybit');ex.withdraw_preview('bybit',j['id']);self.f.timeout=True;ex.withdraw_confirm('bybit',j['id'])
+  self.f.mismatch=True
+  self.assertEqual(ex.reconcile('bybit',j['id'])['data']['recovery_candidates'],[])
+  self.f.mismatch=False;self.f.wtime-=1000
+  self.assertEqual(ex.reconcile('bybit',j['id'])['data']['recovery_candidates'],[])
+  self.assertEqual(ex.reconcile('bybit',j['id'],'withdraw1')['state'],'withdrawing')
+  self.assertEqual(len(self.f.posts),2)
+ def test_recovery_cannot_reuse_another_jobs_withdrawal(self):
+  j=self.bought('bybit');ex.withdraw_preview('bybit',j['id']);self.f.timeout=True;ex.withdraw_confirm('bybit',j['id'])
+  other=ex.insert('bybit',{'action':'buy','withdraw_id':'withdraw1'})
+  self.assertEqual(ex.reconcile('bybit',j['id'])['data']['recovery_candidates'],[])
+  self.assertEqual(ex.reconcile('bybit',j['id'],'withdraw1')['state'],'withdrawing')
+  self.assertEqual(len(self.f.posts),2)
  def test_wrong_history_blocks(self):
   j=self.bought();ex.withdraw_preview('gate',j['id']);ex.withdraw_confirm('gate',j['id']);self.f.mismatch=True
   self.assertEqual(ex.reconcile('gate',j['id'])['state'],'withdrawing')
@@ -120,6 +142,19 @@ class Workflow(unittest.TestCase):
 class Adapter(unittest.TestCase):
  def client(self,v):
   c=object.__new__(clients.Client);c.venue=v;c.key='key';c.secret='secret';return c
+ def test_bybit_recovery_history_pages_and_time_window(self):
+  c=self.client('bybit');calls=[]
+  def request(path,p):
+   calls.append(dict(p))
+   return {'rows':[], 'nextPageCursor':'next' if not p.get('cursor') else ''}
+  c.request=request;c.history(start=1000)
+  self.assertEqual(len(calls),2)
+  self.assertEqual(calls[0]['startTime'],700000)
+  self.assertEqual(calls[0]['endTime'],1300000)
+  self.assertEqual(calls[1]['cursor'],'next')
+ def test_bybit_repeated_history_cursor_fails_closed(self):
+  c=self.client('bybit');c.request=lambda *a:{'rows':[],'nextPageCursor':'same'}
+  with self.assertRaises(clients.ExchangeError):c.history(start=1000)
  def test_bybit_address_pagination_and_case(self):
   c=self.client('bybit');calls=[]
   def request(path,p):

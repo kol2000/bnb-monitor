@@ -243,7 +243,7 @@ class Client:
             'timestamp':int(time.time()*1000),'forceChain':1,'accountType':'UTA','feeType':0},'POST')
         return str(r['id'])
 
-    def history(self,ident=None,withdraw_id=None):
+    def history(self,ident=None,withdraw_id=None,start=None):
         if self.venue=='gate':
             p={'currency':'BNB','limit':100}
             if ident:p['withdraw_order_id']=ident
@@ -256,7 +256,17 @@ class Client:
         # uncertain until the user supplies the ID from Bybit for strict matching.
         p={'coin':'BNB','withdrawType':0,'limit':50}
         if withdraw_id:p['withdrawID']=withdraw_id
-        rows=self.request('/v5/asset/withdraw/query-record',p)['rows']
+        if start is not None:
+            p.update(startTime=max(0,int((start-300)*1000)),endTime=int(min(time.time(),start+300)*1000))
+        rows=[]; cursors=set()
+        for _ in range(20):
+            result=self.request('/v5/asset/withdraw/query-record',p)
+            rows.extend(result['rows'])
+            cursor=result.get('nextPageCursor')
+            if not cursor:break
+            if cursor in cursors:raise ExchangeError('Биржа повторяет страницу истории. Сверка не завершена.')
+            cursors.add(cursor);p['cursor']=cursor
+        else:raise ExchangeError('История слишком велика. Укажите ID вывода для точной сверки.')
         return [dict(id=str(r['withdrawId']),coin=r['coin'],network=r['chain'],address=r['toAddress'],amount=r['amount'],
             status=r['status'],txid=r.get('txID',''),created=r['createTime'],done=r['status']=='success',
             failed=r['status'] in ('CancelByUser','Reject','Fail')) for r in rows]

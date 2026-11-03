@@ -367,6 +367,7 @@ def reconcile(ident):
     if state not in ('buying','withdrawing'):
         return j
     client = Client()
+    d['last_checked'] = time.time()
     try:
         if state == 'buying':
             order = client.call('/api/v3/order', {'symbol':'BNBUSDT','origClientOrderId':ident})
@@ -670,3 +671,4 @@ def install(app):
     for name, fn in list(app.view_functions.items()):
         if name.startswith('binance_') and name != 'binance_jobs':
             app.view_functions[name] = serialized(fn)
+

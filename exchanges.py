@@ -152,8 +152,24 @@ def confirm(v,ident):
     except Exception as e:
         return save(j,error=str(e) if isinstance(e,ValueError) else 'Нет подтверждения ордера. Повторная отправка заблокирована.')
 
+def withdrawal_matches(d,r):
+    try:
+        return (r['coin']=='BNB' and r['network']=='BSC' and
+            r['address'].lower()==d['address'].lower() and
+            dec(r['amount'])==dec(d['withdraw_plan']['amount']) and
+            abs(int(r['created'])/1000-d['withdraw_time'])<=300)
+    except (KeyError,ValueError,TypeError):return False
+
+def withdrawal_used(v,ident,withdraw_id):
+    from app import db
+    with db() as c:
+        rows=c.execute('SELECT data FROM exchange_jobs WHERE venue=? AND id<>?',(v,ident)).fetchall()
+    return any(str(json.loads(r['data']).get('withdraw_id',''))==str(withdraw_id) for r in rows)
+
 def reconcile(v,ident,withdraw_id=None):
     j=job(v,ident); d=j['data']; client=Client(v)
+    if j['state'] not in ('ordering','withdrawing'):return j
+    d['last_checked']=time.time()
     try:
         if j['state']=='ordering' and d.get('funding_pending'):
             coin='BNB' if d['action']=='sell' else 'USDT'
@@ -189,9 +205,12 @@ def reconcile(v,ident,withdraw_id=None):
         if j['state']=='withdrawing':
             supplied=withdraw_id or d.get('withdraw_id')
             if v=='bybit' and not supplied:
-                raise ExchangeError('Ответ Bybit потерян. Укажите ID вывода из истории Bybit для сверки. Не создавайте повторный вывод.')
+                rows=client.history(start=d['withdraw_time'])
+                candidates={r['id']:r for r in rows if withdrawal_matches(d,r) and not withdrawal_used(v,ident,r['id'])}
+                d['recovery_candidates']=list(candidates.values())
+                raise ExchangeError('ID заявки не получен. Найдены совпадения: '+str(len(candidates))+'. Подтвердите привязку записи ниже либо укажите ID из истории Bybit. Повторный вывод не отправляется.')
             if supplied and not re.fullmatch('[A-Za-z0-9_-]{1,128}',supplied):raise ExchangeError('Неверный ID вывода.')
-            rows=client.history(ident,supplied)
+            rows=client.history(ident,supplied,**({'start':d['withdraw_time']} if v=='bybit' else {}))
             rows=[r for r in rows if (r['id']==supplied if supplied else r.get('request_id')==ident)]
             if len(rows)!=1:raise ExchangeError('Вывод ещё не найден. Повторная отправка заблокирована.')
             r=rows[0]
@@ -199,7 +218,9 @@ def reconcile(v,ident,withdraw_id=None):
                 raise ExchangeError('Вывод не совпал по адресу, сети, монете или сумме.')
             if v=='bybit' and abs(int(r['created'])/1000-d['withdraw_time'])>300:
                 raise ExchangeError('Время вывода не совпало с запросом.')
+            if withdrawal_used(v,ident,r['id']):raise ExchangeError('Этот вывод уже связан с другой операцией.')
             d['withdraw_id']=r['id']; d['withdrawal']=r
+            d.pop('recovery_candidates',None)
             return save(j,'done' if r['done'] else 'closed' if r['failed'] else 'withdrawing')
         return j
     except Exception as e:
