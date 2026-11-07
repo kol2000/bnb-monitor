@@ -387,6 +387,13 @@ def install(app):
         return preview(wid,'usdt',body.get('destination',''),body.get('exchange'))
     @app.post('/api/swaps/<ident>/confirm')
     def swap_confirm(ident): return confirm(ident)
+    @app.get('/api/swaps/<ident>')
+    def swaps_status(ident):
+        with db() as c:
+            row=c.execute('SELECT * FROM swaps WHERE id=?',(ident,)).fetchone()
+        if not row:return {'error':'Операция не найдена. Проверьте журнал.'},404
+        return public(row)
+
     @app.get('/api/swaps')
     def swap_list():
         with db() as c:

@@ -9,6 +9,7 @@
   <script src="/static/binance.js" defer></script>
   <script src="/static/exchanges.js" defer></script>
   <script src="/static/swaps.js" defer></script>
+  <script src="/static/transfer-dialog.js" defer></script>
   <script src="/static/operations.js" defer></script>
   <link rel="stylesheet" href="/static/binance.css">
   <script src="/static/generator.js" defer></script>
@@ -132,5 +133,10 @@
 <h2 id="app-dialog-title">Подтверждение действия</h2><p id="app-dialog-description"></p>
 <label id="app-dialog-input-label" hidden>Название<input id="app-dialog-input" type="text" autocomplete="off"></label>
 <div class="save-bar"><button id="app-dialog-cancel" type="button" class="secondary" autofocus>Отмена</button><button id="app-dialog-confirm" type="button">Подтвердить</button></div>
-</dialog><dialog id="exchange-choice"><h2>Выберите биржу получателя</h2><label>Биржа<select id="exchange-choice-select"></select></label><p id="exchange-choice-address" class="mono"></p><div class="save-bar"><button id="exchange-choice-cancel" class="secondary">Отмена</button><button id="exchange-choice-confirm" class="withdraw-confirm">Продолжить</button></div></dialog></body></html>
+</dialog><dialog id="exchange-choice"><h2>Выберите биржу получателя</h2><label>Биржа<select id="exchange-choice-select"></select></label><p id="exchange-choice-address" class="mono"></p><div class="save-bar"><button id="exchange-choice-cancel" class="secondary">Отмена</button><button id="exchange-choice-confirm" class="withdraw-confirm">Продолжить</button></div></dialog><button id="transfer-reopen" class="secondary" hidden>Открыть ход перевода</button>
+<dialog id="transfer-dialog" aria-labelledby="transfer-title"><h2 id="transfer-title">Вывод</h2>
+<label id="transfer-options">Биржа получателя<select id="transfer-exchange"></select></label>
+<p id="transfer-details"></p><p id="transfer-status" role="status" aria-live="polite"></p>
+<p id="transfer-updated" class="muted small"></p><p id="transfer-links"></p>
+<div class="save-bar"><button id="transfer-close" class="secondary" type="button">Отмена</button><button id="transfer-next" class="withdraw-confirm" type="button">Рассчитать</button></div></dialog></body></html>
 

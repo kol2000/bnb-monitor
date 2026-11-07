@@ -82,3 +82,6 @@ dialog .secondary{background:transparent;border-color:#34404f;color:#edf2f7}
 
 /* Keep the rounded overview BNB total on one line. */
 #total{white-space:nowrap;overflow-wrap:normal;font-size:clamp(22px,2.3vw,32px)}
+
+#transfer-dialog{width:min(660px,92vw);max-height:85vh;overflow:auto;background:#151b23;color:#edf2f7;border:1px solid #29323e;border-radius:16px;padding:24px;color-scheme:dark}
+#transfer-details,#transfer-status{white-space:pre-wrap;overflow-wrap:anywhere}#transfer-status{font-weight:600}#transfer-exchange{display:block;width:100%;margin-top:8px;padding:10px;background:#0d131b;color:#edf2f7;border:1px solid #34404f;border-radius:8px}#transfer-reopen{position:fixed;right:20px;bottom:20px;z-index:5;background:var(--surface);box-shadow:0 4px 20px #0006}

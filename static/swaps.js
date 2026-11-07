@@ -22,6 +22,7 @@ $('wallet-list').addEventListener('click',async e=>{
  const b=e.target.closest('[data-swap],[data-usdt-transfer]');if(!b||swapBusy)return;
  const transfer=b.hasAttribute('data-usdt-transfer');
  const wid=transfer?b.dataset.usdtTransfer:b.dataset.swap;
+ if(transfer){swapBusy=true;renderWallets();try{await openWalletTransfer(wid,'usdt');}finally{swapBusy=false;await refreshSwaps();renderWallets();}return;}
  let choice=null;
  try{choice=transfer?await chooseDepositExchange('usdt'):null;}catch(err){toast(err.message,true);return;}
  if(transfer&&!choice)return;

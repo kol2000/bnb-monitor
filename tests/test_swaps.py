@@ -82,6 +82,20 @@ class SwapTests(unittest.TestCase):
             p.start();self.addCleanup(p.stop)
     def row(self,ident):
         with app.db() as c:return dict(c.execute('SELECT * FROM swaps WHERE id=?',(ident,)).fetchone())
+    def test_status_endpoint_is_authenticated_readonly_and_sanitized(self):
+        row=self.ready()
+        client=app.app.test_client()
+        url='/api/swaps/'+row['id']
+        self.assertEqual(client.get(url).status_code,401)
+        with client.session_transaction() as session:session['auth']=True
+        response=client.get(url)
+        self.assertEqual(response.status_code,200)
+        data=response.get_json()
+        self.assertEqual(data['id'],row['id'])
+        for key in ('plan','raw','raw1','raw2','seed','mnemonic'):
+            self.assertNotIn(key,data)
+        self.assertEqual(client.get('/api/swaps/not-found').status_code,404)
+
     def ready(self,kind='swap'):
         p=sw.preview(self.wid,kind,TARGET);sw.confirm(p['id']);return self.row(p['id'])
     def test_selected_bybit_usdt_address_change_invalidates_preview(self):

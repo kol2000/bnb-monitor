@@ -191,6 +191,20 @@ class WithdrawTests(unittest.TestCase):
         self.assertEqual(self.row(row['id'])['state'], 'pending1')
         self.assertEqual(self.rpc.sent, [])
 
+    def test_status_endpoint_is_authenticated_readonly_and_sanitized(self):
+        row=self.ready()
+        client=app.app.test_client()
+        url='/api/withdrawals/'+row['id']
+        self.assertEqual(client.get(url).status_code,401)
+        with client.session_transaction() as session:session['auth']=True
+        response=client.get(url)
+        self.assertEqual(response.status_code,200)
+        data=response.get_json()
+        self.assertEqual(data['id'],row['id'])
+        for key in ('plan','raw','raw1','raw2','seed','mnemonic'):
+            self.assertNotIn(key,data)
+        self.assertEqual(client.get('/api/withdrawals/not-found').status_code,404)
+
     def test_auth_and_csrf(self):
         client = app.app.test_client()
         self.assertEqual(client.get('/api/withdrawals').status_code, 401)

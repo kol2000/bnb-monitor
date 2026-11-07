@@ -251,11 +251,7 @@ $('wallet-list').addEventListener('click',async e=>{
  const b=e.target.closest('[data-withdraw]');if(!b || withdrawalBusy)return;
  withdrawalBusy=true;renderWallets();
  try{
-  const choice=await chooseDepositExchange('bnb'); if(!choice)return;
-  toast('Рассчитываем маршрут и комиссии…');
-  const p=await api('wallets/'+b.dataset.withdraw+'/withdraw/preview','POST',{exchange:choice.exchange});
-  const accepted=p.legs===1?await uiConfirm(`Аккаунт 2 → ${p.exchange} (BSC)\nИсточник: ${p.source}\nПолучатель: ${p.destination}\nПолучит: ${p.value1} BNB\nКомиссия: ${p.fee} BNB\n\nПодтвердить один перевод?`):await uiConfirm(`Вывести BNB в сети BSC?\n\nПервый аккаунт:\n${p.source}\nБаланс: ${p.balance1} BNB\n\nВторой аккаунт этой сид-фразы:\n${p.middle}\nУже есть: ${p.balance2} BNB\nПолучит: ${p.value1} BNB\n\nБиржа: ${p.exchange}\n${p.destination}\nПолучит всего: ${p.value2} BNB\n\nКомиссия каждого перевода: ${p.fee} BNB.\nВыводится также имеющийся BNB второго аккаунта. USDT не переводится.\n\nПроверьте адрес биржи, сеть BSC и минимальную сумму депозита. Подтвердить оба перевода?`);
-  if(accepted){confirmingWallet=String(b.dataset.withdraw);renderWallets();const result=await api('withdrawals/'+p.id+'/confirm','POST',{});activeWithdrawals=[result];toast('Вывод запущен. Статус и хеши — на вкладке «Журнал операций».');}
+  await openWalletTransfer(b.dataset.withdraw,'bnb');
  }catch(err){toast(err.message,true);}finally{confirmingWallet=null;withdrawalBusy=false;renderWallets();await refreshWithdrawals();}
 });
 const withdrawalRetries=new Set();

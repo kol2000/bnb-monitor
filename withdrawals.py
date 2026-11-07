@@ -502,6 +502,13 @@ def install(app):
         finally:
             lock.release()
 
+    @app.get('/api/withdrawals/<ident>')
+    def withdrawals_status(ident):
+        with db() as c:
+            row=c.execute('SELECT * FROM withdrawals WHERE id=?',(ident,)).fetchone()
+        if not row:return {'error':'Операция не найдена. Проверьте журнал.'},404
+        return public(row)
+
     @app.get('/api/withdrawals')
     def list_route():
         with db() as c:
