@@ -164,7 +164,7 @@ function formatUsdtTotal(value) {
 async function refresh(){
  if(!loggedIn||refreshing)return;refreshing=true;
  try{
- const d=await api('state');$('total').textContent=d.total;$('count').textContent=d.wallets.length;
+ const d=await api('state');$('total').textContent=Number.isFinite(Number(d.total)) ? (Number(d.total)>0&&Number(d.total)<0.000001 ? '<0.000001' : Number(d.total).toFixed(6)) : '—';$('total').title=String(d.total)+' BNB';$('count').textContent=d.wallets.length;
  $('checked-count').textContent='С балансом: '+d.wallets.filter(w=>w.balance!==null).length+' из '+d.wallets.length;
  $('total-usd').textContent=d.total_usd ? '≈ '+d.total_usd : 'USD —';
  const quote=d.price;
