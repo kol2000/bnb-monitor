@@ -50,7 +50,7 @@ $('usdt-dialog-confirm').onclick=async()=>{
  finally{usdtDispatching=false;await usdtRefresh(j.venue).catch(()=>{});}
 };
 for(const v of Object.keys(usdtNames)){
- const section=document.querySelector(`[data-usdt-venue="${v}"]`),form=section.querySelector('form');
+ const section=document.querySelector(`[data-usdt-venue="${v}"]`),form=section.querySelector('.usdt-form');
  form.elements.maximum.onchange=()=>{form.elements.amount.disabled=form.elements.maximum.checked;};
  form.onsubmit=async e=>{
   e.preventDefault();if(usdtBusy[v]||usdtDispatching||appDialogBusy)return;usdtBusy[v]=true;

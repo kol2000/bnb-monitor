@@ -1,4 +1,4 @@
-<div class="settings-grid usdt-section" data-usdt-venue="{{ venue }}">
+{% if part == 'form' %}
   <form class="card usdt-form">
     <h2>Вывести USDT → внешний кошелёк</h2>
     <label>Сеть получателя<select name="network"><option value="BSC">BSC (BEP20)</option></select></label>
@@ -9,5 +9,6 @@
     <p class="muted small">Перед отправкой покажем сумму и комиссию биржи в USDT. BNB для оплаты комиссии на бирже не требуется. Получатель должен поддерживать USDT в сети BSC. {% if venue == 'bybit' %}Адрес USDT/BSC должен быть подтверждён в белом списке Bybit.{% endif %}</p>
     <button class="withdraw-confirm" type="submit">Вывести USDT</button>
   </form>
+{% else %}
   <div class="card"><h2>Выводы USDT из приложения</h2><p class="muted small">Статус проверяется автоматически. Повторная отправка при потере ответа заблокирована.</p><div class="usdt-jobs">Операций пока нет.</div></div>
-</div>
+{% endif %}

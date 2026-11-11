@@ -3,7 +3,7 @@ const els={},sections={};
 function el(id){return els[id]||={hidden:false,disabled:false,textContent:'',innerHTML:'',open:false,listeners:{},click(){},addEventListener(e,fn){this.listeners[e]=fn;},showModal(){this.open=true;},close(){this.open=false;this.listeners.close?.();}};}
 for(const v of ['binance','gate','bybit']){
  const submit={},form={elements:{amount:{value:'10'},maximum:{checked:false},address:{value:'0x'+'1'.repeat(40)},source:{value:v==='bybit'?'FUND':'UTA'}},querySelector:()=>submit};
- const box={};sections[v]={form,box,querySelector:s=>s==='form'?form:box,addEventListener(e,fn){this[e]=fn;}};
+ const box={};sections[v]={form,box,querySelector:s=>s==='.usdt-form'?form:box,addEventListener(e,fn){this[e]=fn;}};
 }
 let job=null,calls=[],fail=false,refreshes=0;
 const ctx={$:el,document:{getElementById:el,querySelector(s){const v=s.match(/venue="([a-z]+)"/)[1];return s.endsWith('.usdt-jobs')?sections[v].box:sections[v];}},MutationObserver:class{observe(){}},loggedIn:true,appDialogBusy:false,

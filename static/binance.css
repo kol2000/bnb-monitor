@@ -50,3 +50,8 @@
 :is(#gate-jobs,#bybit-jobs)>.card{padding:18px 0;border:0;border-bottom:1px solid var(--line);border-radius:0}
 :is(#gate-jobs,#bybit-jobs)>.card:last-child{border-bottom:0}
 :is(#gate-history,#bybit-history) .mono{overflow-wrap:anywhere}
+
+/* Independent columns: long operation histories never stretch the buy form. */
+.usdt-section { align-items: start; }
+.exchange-column { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+.exchange-column > .card { min-width: 0; }
