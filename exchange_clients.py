@@ -125,13 +125,14 @@ class Client:
             raise ExchangeError('Неизвестный статус внутреннего перевода.')
         return r['status']
 
-    def network(self):
+    def network(self, coin="BNB"):
+        if coin not in ("BNB","USDT"):raise ExchangeError("Неверная монета.")
         if self.venue=='gate':
-            rows=self.request('/wallet/currency_chains',{'currency':'BNB'},signed=False)
+            rows=self.request('/wallet/currency_chains',{'currency':coin},signed=False)
             n=one([n for n in rows if n.get('chain')=='BSC'])
             if any(str(n.get(k))!='0' for k in ('is_disabled','is_withdraw_disabled','is_tag')):
-                raise ExchangeError('Вывод Gate BNB/BSC недоступен или требует тег.')
-            w=one([n for n in self.request('/wallet/withdraw_status',{'currency':'BNB'}) if n.get('currency')=='BNB'])
+                raise ExchangeError('Вывод Gate '+coin+'/BSC недоступен или требует тег.')
+            w=one([n for n in self.request('/wallet/withdraw_status',{'currency':coin}) if n.get('currency')==coin])
             fee=dec(w['withdraw_fix_on_chains']['BSC'])
             percent=str(w.get('withdraw_percent_on_chains',{}).get('BSC',w.get('withdraw_percent')))
             rate=dec(percent.rstrip('%'))/(100 if percent.endswith('%') else 1)
@@ -139,10 +140,10 @@ class Client:
             maximum=min(dec(w['withdraw_eachtime_limit']),dec(w['withdraw_day_limit_remain']))
             step=precision(n['decimal'])
         else:
-            coin=one([r for r in self.request('/v5/asset/coin/query-info',{'coin':'BNB'})['rows'] if r.get('coin')=='BNB'])
-            n=one([r for r in coin['chains'] if r.get('chain')=='BSC'])
+            coin_info=one([r for r in self.request('/v5/asset/coin/query-info',{'coin':coin})['rows'] if r.get('coin')==coin])
+            n=one([r for r in coin_info['chains'] if r.get('chain')=='BSC'])
             if n.get('chainWithdraw')!='1':
-                raise ExchangeError('Вывод Bybit BNB/BSC приостановлен.')
+                raise ExchangeError('Вывод Bybit '+coin+'/BSC приостановлен.')
             fee=dec(n['withdrawFee']); rate=dec(n['withdrawPercentageFee'] or '0')
             minimum=dec(n['withdrawMin'])
             # Bybit documents -1 as no per-transaction chain maximum.
@@ -153,7 +154,8 @@ class Client:
             raise ExchangeError('Биржа вернула процентную комиссию вывода. Используйте её интерфейс.')
         return dict(network='BSC',fee=fmt(fee),minimum=fmt(minimum),maximum=None if maximum is None else fmt(maximum),step=fmt(step))
 
-    def address_check(self,address):
+    def address_check(self,address,coin="BNB"):
+        if coin not in ("BNB","USDT"):raise ExchangeError("Неверная монета.")
         if self.venue!='bybit':
             return
         cursor=''; seen=set()
@@ -162,7 +164,7 @@ class Client:
             if cursor:p['cursor']=cursor
             data=self.request('/v5/asset/withdraw/query-address',p)
             for r in data['rows']:
-                if r.get('address')==address and r.get('coin') in ('BNB','baseCoin') and r.get('chain')=='BSC' and not r.get('tag'):
+                if r.get('address')==address and r.get('coin') in (coin,'baseCoin') and r.get('chain')=='BSC' and not r.get('tag'):
                     if r.get('status')==0 and r.get('verified')==1:
                         return
                     raise ExchangeError('Адрес Bybit ещё не подтверждён или действует 24-часовое ограничение.')
@@ -170,7 +172,7 @@ class Client:
             if not cursor:break
             if cursor in seen:raise ExchangeError('Ошибка пагинации адресов Bybit.')
             seen.add(cursor)
-        raise ExchangeError('Сначала добавьте и подтвердите адрес BNB/BSC в белом списке Bybit. Регистр букв должен совпадать.')
+        raise ExchangeError('Сначала добавьте и подтвердите адрес '+coin+'/BSC в белом списке Bybit. Регистр букв должен совпадать.')
 
     def market(self):
         if self.venue=='gate':
@@ -235,17 +237,19 @@ class Client:
             if total!=qty or cursor:raise ExchangeError('Получены не все исполнения Bybit.')
         return dict(id=str(r['orderId']),terminal=terminal,quantity=fmt(qty),quote=fmt(dec(r['cumExecValue'])),fees=fees,status=r['orderStatus'])
 
-    def withdraw(self,ident,address,amount):
+    def withdraw(self,ident,address,amount,coin="BNB",account_type="UTA"):
+        if coin not in ("BNB","USDT") or account_type not in ("FUND","UTA"):raise ExchangeError("Неверные параметры вывода.")
         if self.venue=='gate':
-            r=self.request('/withdrawals',{'withdraw_order_id':ident,'currency':'BNB','address':address,'amount':amount,'chain':'BSC'},'POST')
+            r=self.request('/withdrawals',{'withdraw_order_id':ident,'currency':coin,'address':address,'amount':amount,'chain':'BSC'},'POST')
             return str(r['id'])
-        r=self.request('/v5/asset/withdraw/create',{'requestId':ident,'coin':'BNB','chain':'BSC','address':address,'amount':amount,
-            'timestamp':int(time.time()*1000),'forceChain':1,'accountType':'UTA','feeType':0},'POST')
+        r=self.request('/v5/asset/withdraw/create',{'requestId':ident,'coin':coin,'chain':'BSC','address':address,'amount':amount,
+            'timestamp':int(time.time()*1000),'forceChain':1,'accountType':account_type,'feeType':0},'POST')
         return str(r['id'])
 
-    def history(self,ident=None,withdraw_id=None,start=None):
+    def history(self,ident=None,withdraw_id=None,start=None,coin="BNB"):
+        if coin not in ("BNB","USDT"):raise ExchangeError("Неверная монета.")
         if self.venue=='gate':
-            p={'currency':'BNB','limit':100}
+            p={'currency':coin,'limit':100}
             if ident:p['withdraw_order_id']=ident
             if withdraw_id:p['withdraw_id']=withdraw_id
             rows=self.request('/wallet/withdrawals',p)
@@ -254,7 +258,7 @@ class Client:
                 done=r['status']=='DONE',failed=r['status'] in ('CANCEL','INVALID')) for r in rows]
         # Bybit history does NOT return requestId. A lost create response stays
         # uncertain until the user supplies the ID from Bybit for strict matching.
-        p={'coin':'BNB','withdrawType':0,'limit':50}
+        p={'coin':coin,'withdrawType':0,'limit':50}
         if withdraw_id:p['withdrawID']=withdraw_id
         if start is not None:
             p.update(startTime=max(0,int((start-300)*1000)),endTime=int(min(time.time(),start+300)*1000))

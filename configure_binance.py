@@ -38,23 +38,26 @@ for name,fn in [
         raise SystemExit('Ожидаются полный API Key и Secret системного HMAC-ключа Binance.')
     code = '''import os,sys,tempfile,json
 from pathlib import Path
-from app import DATA
+from app import DATA,db
+from exchange_usdt import locked,check_idle
 raw=sys.stdin.buffer.read(4096)
 json.loads(raw)
-fd,tmp=tempfile.mkstemp(dir=DATA,prefix='.binance-key-')
-try:
-    with os.fdopen(fd,'wb') as f:
-        f.write(raw)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp,DATA/'binance-api.json')
-finally:
-    if os.path.exists(tmp): os.unlink(tmp)
+with locked('binance'):
+    with db() as c: check_idle(c,'binance')
+    fd,tmp=tempfile.mkstemp(dir=DATA,prefix='.binance-key-')
+    try:
+        with os.fdopen(fd,'wb') as f:
+            f.write(raw)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp,DATA/'binance-api.json')
+    finally:
+        if os.path.exists(tmp): os.unlink(tmp)
 '''
     command = (['sudo'] if os.geteuid() != 0 else []) + ['docker','compose','exec','-T','web','python','-c',code]
     result = subprocess.run(command,input=json.dumps({'api_key':key,'api_secret':secret}).encode(),capture_output=True)
     if result.returncode:
-        raise SystemExit('Не удалось установить ключ. Проверьте, что контейнер web запущен. Секреты не выведены.')
+        raise SystemExit('Не удалось установить ключ. Проверьте контейнер web и завершите активные операции Binance. Секреты не выведены.')
     print('Ключи Binance сохранены в Docker с правами 600. Откройте вкладку «Биржа Binance» → «Проверить баланс и выводы».')
 
 

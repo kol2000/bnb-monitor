@@ -335,6 +335,8 @@ def buy_confirm(ident):
     ensure_withdrawal_supported(client)
     with db() as c:
         c.execute('BEGIN IMMEDIATE')
+        from exchange_usdt import check_usdt_idle
+        check_usdt_idle(c, 'binance')
         if c.execute("SELECT 1 FROM binance_jobs WHERE state IN ('buying','bought','withdrawing')").fetchone():
             raise BinanceError('Сначала завершите текущую операцию Binance.')
         if not c.execute("UPDATE binance_jobs SET state='buying' WHERE id=? AND state='preview'",(ident,)).rowcount:
@@ -548,6 +550,8 @@ def sell_plan(client):
 def sell_preview():
     from app import db
     with db() as c:
+        from exchange_usdt import check_usdt_idle
+        check_usdt_idle(c, 'binance')
         if c.execute("SELECT 1 FROM binance_jobs WHERE state IN ('buying','bought','withdrawing')").fetchone():
             raise BinanceError('Сначала завершите текущую операцию или оставьте купленный BNB на бирже.')
     data = sell_plan(Client())
@@ -569,6 +573,8 @@ def sell_confirm(ident):
         raise BinanceError('Баланс изменился. Рассчитайте продажу заново.')
     with db() as c:
         c.execute('BEGIN IMMEDIATE')
+        from exchange_usdt import check_usdt_idle
+        check_usdt_idle(c, 'binance')
         if c.execute("SELECT 1 FROM binance_jobs WHERE state IN ('buying','bought','withdrawing')").fetchone():
             raise BinanceError('Сначала завершите текущую операцию Binance.')
         if not c.execute("UPDATE binance_jobs SET state='buying' WHERE id=? AND state='preview'",(ident,)).rowcount:

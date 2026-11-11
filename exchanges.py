@@ -110,6 +110,9 @@ def reserve(j,old,state):
     from app import db
     with db() as c:
         c.execute('BEGIN IMMEDIATE')
+        if old=='preview':
+            from exchange_usdt import check_usdt_idle
+            check_usdt_idle(c, j['venue'])
         if old=='preview' and c.execute("SELECT 1 FROM exchange_jobs WHERE venue=? AND state IN ('ordering','bought','withdrawing')",(j['venue'],)).fetchone():
             raise ExchangeError('Сначала завершите предыдущую операцию этой биржи.')
         if not c.execute('UPDATE exchange_jobs SET state=?,data=?,error=? WHERE id=? AND venue=? AND state=?',

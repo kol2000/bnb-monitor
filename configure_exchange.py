@@ -34,12 +34,14 @@ for title,fn in [('Доступный баланс',c.balances),('BNB/BSC',c.net
     code='''import sys,json,os,tempfile
 from app import DATA,db
 from exchanges import locked
+from exchange_usdt import check_usdt_idle
 v=sys.argv[1]
 assert v in ('gate','bybit')
 raw=sys.stdin.buffer.read(4096)
 json.loads(raw)
 with locked(v):
  with db() as c:
+  check_usdt_idle(c,v)
   if c.execute("SELECT 1 FROM exchange_jobs WHERE venue=? AND state IN ('ordering','bought','withdrawing')",(v,)).fetchone():
    raise SystemExit('Есть незавершённые операции. Сначала сверьте их.')
  fd,tmp=tempfile.mkstemp(dir=DATA,prefix='.'+v+'-key-')
