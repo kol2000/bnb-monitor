@@ -28,7 +28,11 @@ function usdtShow(j){
 }
 async function usdtRefresh(v){
  if(!loggedIn)return [];
- const r=await api('usdt-withdrawals/'+v),box=document.querySelector(`[data-usdt-venue="${v}"] .usdt-jobs`);
+ const error=document.querySelector(`[data-usdt-venue="${v}"] .usdt-history-error`);
+ let r;
+ try{r=await api('usdt-withdrawals/'+v);if(error)error.hidden=true;}
+ catch(e){if(error){error.hidden=false;error.textContent='Не удалось загрузить историю USDT: '+e.message+' Повторим автоматически.';}throw e;}
+ const box=document.querySelector(`[data-usdt-venue="${v}"] .usdt-jobs`);
  box.innerHTML=r.items.map(j=>`<article class="usdt-job">${usdtSummary(j)}<p class="muted small">${escapeHtml(date(j.created))}</p><button type="button" class="secondary" data-usdt-view="${j.id}">Открыть операцию</button>${j.state==='sending'?` <button type="button" class="secondary" data-usdt-check="${j.id}">Сверить с биржей</button>${v==='bybit'&&!j.data.withdraw_id?` <button type="button" class="secondary" data-usdt-link="${j.id}">Указать ID вывода</button>`:''}`:''}</article>`).join('')||'<p>Выводов USDT из приложения пока нет.</p>';
  if(usdtDialog.open&&usdtCurrent?.venue===v&&!usdtDispatching){
   const j=r.items.find(x=>x.id===usdtCurrent.id);

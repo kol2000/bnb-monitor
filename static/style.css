@@ -90,3 +90,21 @@ dialog .secondary{background:transparent;border-color:#34404f;color:#edf2f7}
 .usdt-job:last-child { border-bottom: 0; }
 #usdt-dialog { max-width: 660px; width: calc(100% - 40px); max-height: 85vh; overflow-y: auto; }
 #usdt-dialog .mono { overflow-wrap: anywhere; }
+
+/* Bound long names to their column and reserve room for all row actions. */
+.wallet-table { table-layout: fixed; min-width: 1100px; }
+.wallet-table th,.wallet-table td { padding-left: 12px; padding-right: 12px; }
+.wallet-table th:nth-child(1) { width: 29%; }
+.wallet-table th:nth-child(2) { width: 21%; }
+.wallet-table th:nth-child(3) { width: 8%; }
+.wallet-table th:nth-child(4) { width: 9%; }
+.wallet-table th:nth-child(5) { width: 13%; }
+.wallet-table th:nth-child(6),.wallet-table th:nth-child(7) { width: 10%; }
+.wallet-table .name { min-width: 0; max-width: 100%; }
+.wallet-table .name > [data-detail] { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.wallet-table .name > small { flex-shrink: 0; }
+.wallet-table .wallet-actions button { padding-left: 0; padding-right: 0; white-space: nowrap; }
+.wallet-table-wrap { position: relative; }
+.wallet-table th:last-child,.wallet-table td:last-child { position: sticky; right: 0; background: var(--surface); box-shadow: -1px 0 var(--line); z-index: 1; }
+.wallet-table .wallet-money-actions { column-gap: 2px; }
+.wallet-table .wallet-money-actions button { padding-left: 4px; padding-right: 4px; }

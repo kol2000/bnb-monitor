@@ -55,3 +55,13 @@
 .usdt-section { align-items: start; }
 .exchange-column { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
 .exchange-column > .card { min-width: 0; }
+
+.exchange-history-panel { height: var(--forms-height, 1100px); display: flex; flex-direction: column; overflow: hidden; }
+.exchange-history-panel > .section-heading { flex: 0 0 auto; align-items: center; margin-bottom: 16px; }
+.exchange-history-panel > .section-heading h2 { margin: 0; }
+.history-expand { flex-shrink: 0; }
+.exchange-history-body { min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; overflow-wrap: anywhere; padding-right: 8px; }
+.exchange-history-panel.expanded { height: auto; }
+.exchange-history-panel.expanded .exchange-history-body { overflow: visible; }
+.usdt-history { border-bottom: 1px solid var(--line); margin-bottom: 20px; padding-bottom: 16px; }
+@media(max-width:800px) { .exchange-history-panel { height: 70vh; min-height: 360px; } .exchange-history-panel.expanded { height: auto; } }

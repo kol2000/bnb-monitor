@@ -10,5 +10,5 @@
     <button class="withdraw-confirm" type="submit">Вывести USDT</button>
   </form>
 {% else %}
-  <div class="card"><h2>Выводы USDT из приложения</h2><p class="muted small">Статус проверяется автоматически. Повторная отправка при потере ответа заблокирована.</p><div class="usdt-jobs">Операций пока нет.</div></div>
+  <section class="usdt-history"><h3>Выводы USDT</h3><p class="muted small">Статус проверяется автоматически. Повторная отправка при потере ответа заблокирована.</p><p class="usdt-history-error negative" role="status" hidden></p><div class="usdt-jobs">Загружаем операции…</div></section>
 {% endif %}
