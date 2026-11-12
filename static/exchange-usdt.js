@@ -2,7 +2,7 @@
 // A confirmation dispatches once. All automatic refreshes read the saved job only.
 const usdtNames={binance:'Binance',gate:'Gate',bybit:'Bybit'};
 const usdtBusy={};
-let usdtCurrent=null,usdtDispatching=false;
+let usdtCurrent=null,usdtDispatching=false,usdtPreviewVersion=0;
 const usdtDialog=document.getElementById('usdt-dialog');
 function usdtSummary(j){
  const d=j.data,labels={preview:'Проверьте параметры',sending:'Вывод ожидает подтверждения',done:'Вывод завершён',failed:'Вывод отклонён / отменён биржей'};
@@ -41,7 +41,7 @@ async function usdtRefresh(v){
  box._jobs=r.items;return r.items;
 }
 $('usdt-dialog-close').onclick=()=>usdtDialog.close();
-usdtDialog.addEventListener('close',()=>{appDialogBusy=false;});
+usdtDialog.addEventListener('close',()=>{appDialogBusy=false;usdtPreviewVersion++;});
 $('usdt-dialog-confirm').onclick=async()=>{
  if(usdtDispatching||usdtCurrent?.state!=='preview')return;
  const j=usdtCurrent;usdtDispatching=true;
@@ -59,17 +59,29 @@ for(const v of Object.keys(usdtNames)){
  form.onsubmit=async e=>{
   e.preventDefault();if(usdtBusy[v]||usdtDispatching||appDialogBusy)return;usdtBusy[v]=true;
   const submit=form.querySelector('button[type="submit"]');submit.disabled=true;
+  const version=++usdtPreviewVersion;
+  usdtCurrent=null;appDialogBusy=true;
+  $('usdt-dialog-title').textContent='Вывод USDT · '+usdtNames[v];
+  $('usdt-dialog-content').textContent='Рассчитываем сумму и комиссию вывода…';
+  $('usdt-dialog-error').textContent='';$('usdt-dialog-confirm').hidden=true;
+  $('usdt-dialog-close').textContent='Закрыть';usdtDialog.showModal();
   try{
    const body={address:form.elements.address.value.trim(),amount:form.elements.amount.value,network:'BSC',source:form.elements.source.value,maximum:form.elements.maximum.checked};
    const j=await api('usdt-withdrawals/'+v+'/preview','POST',body);
-   $('usdt-dialog-error').textContent='';usdtShow(j);
-  }catch(e){toast(e.message,true);}finally{usdtBusy[v]=false;submit.disabled=false;}
+   if(usdtDialog.open&&version===usdtPreviewVersion){$('usdt-dialog-error').textContent='';usdtShow(j);}
+  }catch(e){if(usdtDialog.open&&version===usdtPreviewVersion){$('usdt-dialog-content').textContent='Расчёт не выполнен.';$('usdt-dialog-error').textContent=e.message;}}finally{usdtBusy[v]=false;submit.disabled=false;}
  };
  section.addEventListener('click',async e=>{
   const b=e.target.closest('[data-usdt-view],[data-usdt-check],[data-usdt-link]');if(!b||usdtBusy[v]||usdtDispatching)return;
   const id=b.dataset.usdtView||b.dataset.usdtCheck||b.dataset.usdtLink;
   if(b.dataset.usdtView){const j=section.querySelector('.usdt-jobs')._jobs?.find(x=>x.id===id);if(j&&!appDialogBusy){$('usdt-dialog-error').textContent='';usdtShow(j);}return;}
   usdtBusy[v]=true;b.disabled=true;
+  const version=++usdtPreviewVersion;
+  usdtCurrent=null;appDialogBusy=true;
+  $('usdt-dialog-title').textContent='Вывод USDT · '+usdtNames[v];
+  $('usdt-dialog-content').textContent='Рассчитываем сумму и комиссию вывода…';
+  $('usdt-dialog-error').textContent='';$('usdt-dialog-confirm').hidden=true;
+  $('usdt-dialog-close').textContent='Закрыть';usdtDialog.showModal();
   try{
    const body={};
    if(b.dataset.usdtLink){const wid=await uiPrompt('ID вывода USDT из истории Bybit. Проверим сумму, адрес, сеть и время.','');if(!wid)return;body.withdraw_id=wid.trim();}

@@ -57,7 +57,7 @@ async function refreshVenueJobs(v){
  try{
  const r=await api('exchanges/'+v+'/jobs');
  const labels={ordering:'Проверка ордера',bought:'BNB куплен',withdrawing:'Вывод обрабатывается',done:'Завершено',closed:'Закрыто'};
- $(v+'-jobs').innerHTML=r.items.map(j=>`<div class="card"><strong>${escapeHtml(j.data.funding_pending?'Перевод '+(j.data.action==='sell'?'BNB':'USDT')+' на торговый аккаунт':j.state==='withdrawing'&&!j.data.withdraw_id?'Вывод требует сверки':labels[j.state]||j.state)} · ${j.data.action==='sell'?'Продажа':'Покупка'}</strong><p>${escapeHtml(date(j.created))}</p>${venueAmounts(j.data)}${j.data.execution?`<p>Исполнено: ${escapeHtml(j.data.execution.quantity)} BNB · ${escapeHtml(j.data.execution.quote)} USDT</p>`:''}${j.data.address?`<p class="mono">${escapeHtml(j.data.address)}</p>`:''}${j.data.withdrawal?`<p>Вывод: ${escapeHtml(j.data.withdrawal.status)}</p>`:''}${j.data.last_checked?`<p class="muted">Последняя сверка: ${escapeHtml(date(j.data.last_checked))}</p>`:''}${(j.data.recovery_candidates||[]).map(r=>`<p>${escapeHtml(r.amount)} BNB · ${escapeHtml(date(Number(r.created)/1000))} · ${escapeHtml(r.status)} · ID: ${escapeHtml(r.id)} <button class="secondary" data-exchange="${v}" data-job="${j.id}" data-venue-action="recover" data-withdraw-id="${escapeHtml(r.id)}">Связать с операцией</button></p>`).join('')}${j.error?`<p class="negative">${escapeHtml(j.error)}</p>`:''}${['ordering','withdrawing'].includes(j.state)?`<button class="secondary" data-exchange="${v}" data-job="${j.id}" data-venue-action="check">Сверить с биржей</button>`:''}${v==='bybit'&&j.state==='withdrawing'&&!j.data.withdraw_id?` <button class="secondary" data-exchange="${v}" data-job="${j.id}" data-venue-action="link">Указать ID вывода</button>`:''}${j.state==='bought'?`<button class="withdraw-confirm" data-exchange="${v}" data-job="${j.id}" data-venue-action="withdraw-preview">Вывести BNB</button> <button class="secondary" data-exchange="${v}" data-job="${j.id}" data-venue-action="keep">Оставить на бирже</button>`:''}</div>`).join('')||'<p>Операций пока нет.</p>';
+ $(v+'-jobs').innerHTML=r.items.map(j=>`<div class="card">${j.data.action!=='sell'?`<button class="secondary" data-exchange="${v}" data-job="${j.id}" data-venue-action="open">Открыть операцию</button>`:''}<strong>${escapeHtml(j.data.funding_pending?'Перевод '+(j.data.action==='sell'?'BNB':'USDT')+' на торговый аккаунт':j.state==='withdrawing'&&!j.data.withdraw_id?'Вывод требует сверки':labels[j.state]||j.state)} · ${j.data.action==='sell'?'Продажа':'Покупка'}</strong><p>${escapeHtml(date(j.created))}</p>${venueAmounts(j.data)}${j.data.execution?`<p>Исполнено: ${escapeHtml(j.data.execution.quantity)} BNB · ${escapeHtml(j.data.execution.quote)} USDT</p>`:''}${j.data.address?`<p class="mono">${escapeHtml(j.data.address)}</p>`:''}${j.data.withdrawal?`<p>Вывод: ${escapeHtml(j.data.withdrawal.status)}</p>`:''}${j.data.last_checked?`<p class="muted">Последняя сверка: ${escapeHtml(date(j.data.last_checked))}</p>`:''}${(j.data.recovery_candidates||[]).map(r=>`<p>${escapeHtml(r.amount)} BNB · ${escapeHtml(date(Number(r.created)/1000))} · ${escapeHtml(r.status)} · ID: ${escapeHtml(r.id)} <button class="secondary" data-exchange="${v}" data-job="${j.id}" data-venue-action="recover" data-withdraw-id="${escapeHtml(r.id)}">Связать с операцией</button></p>`).join('')}${j.error?`<p class="negative">${escapeHtml(j.error)}</p>`:''}${['ordering','withdrawing'].includes(j.state)?`<button class="secondary" data-exchange="${v}" data-job="${j.id}" data-venue-action="check">Сверить с биржей</button>`:''}${v==='bybit'&&j.state==='withdrawing'&&!j.data.withdraw_id?` <button class="secondary" data-exchange="${v}" data-job="${j.id}" data-venue-action="link">Указать ID вывода</button>`:''}${j.state==='bought'?`<button class="withdraw-confirm" data-exchange="${v}" data-job="${j.id}" data-venue-action="withdraw-preview">Вывести BNB</button> <button class="secondary" data-exchange="${v}" data-job="${j.id}" data-venue-action="keep">Оставить на бирже</button>`:''}</div>`).join('')||'<p>Операций пока нет.</p>';
  if(venueBusy[v])$('tab-'+v).querySelectorAll('button').forEach(b=>b.disabled=true);
  }catch(e){if(!$('tab-'+v).hidden)toast(e.message,true);}
 }
@@ -90,20 +90,17 @@ async function venueTrade(v,body){
  if(await uiConfirm(message)){await api('exchanges/'+v+'/'+j.id+'/confirm','POST',{});toast('Статус операции проверяется автоматически.');}
 }
 for(const v of Object.keys(venueNames)){
- $(v+'-buy-form').onsubmit=e=>{e.preventDefault();venueAction(v,()=>venueTrade(v,{action:'buy',amount:$(v+'-amount').value,address:$(v+'-address').value.trim(),goal:$(v+'-goal').value}));};
+ $(v+'-buy-form').onsubmit=e=>{e.preventDefault();startExchangePurchase(v,{action:'buy',amount:$(v+'-amount').value,address:$(v+'-address').value.trim(),goal:$(v+'-goal').value});};
  $('tab-'+v).addEventListener('click',e=>{
  const b=e.target.closest('[data-venue-action]');if(!b||b.disabled)return;
  venueAction(v,async()=>{
  const a=b.dataset.venueAction,id=b.dataset.job,base='exchanges/'+v+'/'+id+'/';
+ if(a==='open'){await openExchangePurchase(v,id);return;}
  if(a==='refresh'){await refreshVenue(v);return;}
  if(a==='sell'){await venueTrade(v,{action:'sell'});return;}
  if(a==='recover'){if(await uiConfirm('Связать эту запись истории биржи с операцией? Это только сверка, деньги повторно не отправляются. ID: '+b.dataset.withdrawId))await api(base+'check','POST',{withdraw_id:b.dataset.withdrawId});return;}
  if(a==='link'){const id=await uiPrompt('ID вывода из истории Bybit. Сверим адрес, сеть, сумму и время.','');if(id)await api(base+'check','POST',{withdraw_id:id.trim()});return;}
- if(a==='withdraw-preview'){
- const j=await api(base+a,'POST',{}),p=j.data.withdraw_plan;
- if(await confirmBinanceWithdrawal(`${venueNames[v]} → кошелёк\nСеть: BSC\nАдрес: ${p.address}\nСумма: ${p.amount} BNB\nКомиссия: ${p.fee} BNB\nНа бирже зарезервирована комиссия. Получение зависит от правил её удержания.`))await api(base+'withdraw','POST',{});
- return;
- }
+ if(a==='withdraw-preview'){await openExchangePurchase(v,id);return;}
  if(a==='keep'&&!await uiConfirm('Оставить купленный BNB на бирже и закрыть операцию?'))return;
  await api(base+a,'POST',{});
  });

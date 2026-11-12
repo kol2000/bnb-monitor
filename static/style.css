@@ -53,7 +53,7 @@ button.withdraw-confirm{background:#198754;border-color:#198754;color:#fff}
 #binance-goal{display:block;width:100%;margin-top:8px;padding:12px;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--text);font:inherit}
 
 /* All application dialogs share the dark grey panel shown for withdrawals. */
-dialog#usdt-dialog,dialog#app-dialog,dialog#binance-withdraw-dialog,dialog#wallet-detail,dialog#exchange-choice{width:min(660px,92vw);max-height:85vh;overflow:auto;background:#151b23;color:#edf2f7;border:1px solid #29323e;border-radius:16px;padding:24px;color-scheme:dark}
+dialog#exchange-purchase-dialog,dialog#usdt-dialog,dialog#app-dialog,dialog#binance-withdraw-dialog,dialog#wallet-detail,dialog#exchange-choice{width:min(660px,92vw);max-height:85vh;overflow:auto;background:#151b23;color:#edf2f7;border:1px solid #29323e;border-radius:16px;padding:24px;color-scheme:dark}
 #app-dialog-description{white-space:pre-wrap;overflow-wrap:anywhere}
 dialog#app-dialog label,dialog#wallet-detail small,dialog#wallet-detail a{color:#b7c2d0}
 dialog#app-dialog input{background:#0d131b;color:#edf2f7;border-color:#34404f}
@@ -108,3 +108,6 @@ dialog .secondary{background:transparent;border-color:#34404f;color:#edf2f7}
 .wallet-table th:last-child,.wallet-table td:last-child { position: sticky; right: 0; background: var(--surface); box-shadow: -1px 0 var(--line); z-index: 1; }
 .wallet-table .wallet-money-actions { column-gap: 2px; }
 .wallet-table .wallet-money-actions button { padding-left: 4px; padding-right: 4px; }
+
+#exchange-purchase-dialog .binance-address{overflow-wrap:anywhere}
+#exchange-purchase-dialog .save-bar{position:sticky;bottom:-24px;background:#151b23;padding:16px 0;margin-bottom:0}
