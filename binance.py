@@ -533,7 +533,7 @@ def recover_rejected_withdrawal(ident):
     # Legacy jobs submitted before explicit rejection handling were kept as
     # "withdrawing". A specific 401/-1002 response proves this request was denied.
     error = str(d.get('withdraw_submit_error') or '')
-    if not re.search(r'Binance HTTP 401\\s*·\\s*код Binance -1002\\b', error):
+    if not re.search(r'Binance HTTP 401\s*·\s*код Binance -1002\b', error):
         raise BinanceError('Нет подтверждённого отказа Binance 401/-1002. Повторный вывод заблокирован.')
     submitted = d.get('withdraw_time')
     if not isinstance(submitted, (int, float)) or not 0 < time.time() - submitted < 6 * 86400:
