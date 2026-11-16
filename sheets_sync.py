@@ -1,8 +1,9 @@
 """Google Sheets wallet import and balance export."""
 import json
 import re
+import socket
 import time
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
@@ -145,21 +146,63 @@ def sync_once():
         set_status(sheets_error='Ошибка синхронизации Google. Проверьте доступность диска и настройки.')
 
 def export_request(cfg, token, suffix, payload=None):
+    """Read-only requests may be retried; a Google Sheets write NEVER is.
+
+    A failed GET during withdrawal preview must not mask its real cause as a
+    balance-export failure. Responses are bounded and secrets are not logged.
+    """
     url = f"https://sheets.googleapis.com/v4/spreadsheets/{cfg['sheets_id']}/{suffix}"
-    req = Request(url, data=json.dumps(payload).encode() if payload is not None else None,
-                  headers={'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'})
-    try:
-        with urlopen(req, timeout=20) as response:
-            raw = response.read(2_000_001)
-        if len(raw) > 2_000_000:
-            raise ValueError()
-        return json.loads(raw)
-    except HTTPError as exc:
-        if exc.code in (401, 403):
-            raise RemoteError('Для записи балансов дайте сервисному аккаунту Google доступ «Редактор».') from None
-        raise RemoteError('Не удалось записать балансы: ошибка Google API.') from None
-    except Exception:
-        raise RemoteError('Не удалось обновить балансы в Google Таблице.') from None
+    is_read = payload is None
+    attempts = 3 if is_read else 1
+    for attempt in range(attempts):
+        req = Request(url, data=json.dumps(payload).encode() if payload is not None else None,
+                      headers={'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'})
+        try:
+            with urlopen(req, timeout=20) as response:
+                raw = response.read(2_000_001)
+            if len(raw) > 2_000_000:
+                raise RemoteError('Ответ Google Sheets слишком большой.')
+            result = json.loads(raw)
+            if not isinstance(result, dict):
+                raise ValueError()
+            return result
+        except HTTPError as exc:
+            status = exc.code
+            # Only retry failures that Google defines as potentially transient.
+            if is_read and status in (429, 500, 502, 503, 504) and attempt < attempts - 1:
+                time.sleep(0.4 * 2**attempt)
+                continue
+            if status in (401, 403):
+                action = 'чтения' if is_read else 'записи'
+                raise RemoteError(f'Google запретил доступ для {action} таблицы (HTTP {status}). Проверьте доступ сервисного аккаунта.') from None
+            if status in (400, 404):
+                raise RemoteError(f'Google Sheets HTTP {status}: проверьте ID таблицы, название вкладки и диапазон.') from None
+            if status == 429:
+                raise RemoteError('Google Sheets HTTP 429: превышена квота запросов. Повторите позже.') from None
+            if status in (500, 502, 503, 504):
+                raise RemoteError(f'Google Sheets HTTP {status}: временная ошибка Google API.') from None
+            raise RemoteError(f'Google Sheets HTTP {status}: запрос отклонён.') from None
+        except (URLError, TimeoutError, socket.timeout) as exc:
+            if is_read and attempt < attempts - 1:
+                time.sleep(0.4 * 2**attempt)
+                continue
+            cause = getattr(exc, 'reason', None)
+            reason = cause if cause is not None else exc
+            if isinstance(reason, (TimeoutError, socket.timeout)):
+                kind = 'таймаут'
+            elif isinstance(reason, OSError):
+                kind = 'сетевая ошибка или DNS'
+            else:
+                kind = 'недоступна сеть'
+            action = 'прочитать' if is_read else 'записать'
+            raise RemoteError(f'Не удалось {action} Google Таблицу: {kind}.') from None
+        except RemoteError:
+            raise
+        except (ValueError, UnicodeError):
+            raise RemoteError('Google Sheets вернул некорректный JSON.') from None
+        except Exception:
+            action = 'прочитать' if is_read else 'записать'
+            raise RemoteError(f'Не удалось {action} Google Таблицу: непредвиденная ошибка API.') from None
 
 def balance_updates(header, rows, balances, tab, asset='BNB'):
     normalize = lambda value: ' '.join(str(value).split()).casefold()
