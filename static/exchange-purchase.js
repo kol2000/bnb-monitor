@@ -5,7 +5,7 @@ purchaseDialog.id='exchange-purchase-dialog';
 purchaseDialog.setAttribute('aria-labelledby','purchase-title');
 purchaseDialog.innerHTML=`<h2 id="purchase-title">Покупка BNB → внешний кошелёк</h2>
 <div id="purchase-content" aria-live="polite"></div><p id="purchase-error" class="negative" role="status"></p>
-<div class="save-bar"><button type="button" id="purchase-close" class="secondary">Закрыть</button><button type="button" id="purchase-next" class="withdraw-confirm" hidden></button></div>`;
+<div class="save-bar"><button type="button" id="purchase-close" class="secondary">Закрыть</button><button type="button" id="purchase-check" class="secondary" hidden>Сверить с биржей</button><button type="button" id="purchase-next" class="withdraw-confirm" hidden></button></div>`;
 document.body.append(purchaseDialog);
 let purchaseSession=null;
 function purchaseBase(v){return v==='binance'?'binance':'exchanges/'+v;}
@@ -15,7 +15,7 @@ function purchaseOpen(v){
  purchaseSession=s;appDialogBusy=true;
  $('purchase-title').textContent=(usdtNames[v]||v)+' · Купить BNB → вывести на кошелёк';
  $('purchase-error').textContent='';$('purchase-content').textContent='Рассчитываем покупку и комиссии…';
- $('purchase-next').hidden=true;purchaseDialog.showModal();return s;
+ $('purchase-next').hidden=true;$('purchase-check').hidden=true;purchaseDialog.showModal();return s;
 }
 function purchaseVisible(s){return purchaseSession===s&&purchaseDialog.open;}
 function purchaseError(s,e){if(purchaseVisible(s))$('purchase-error').textContent=e.message||String(e);}
@@ -24,6 +24,7 @@ function purchaseRender(s){
  const j=s.job,d=j.data,esc=escapeHtml;
  if(['done','closed'].includes(j.state))s.step='finished';
  const states={preview:'1. Подтвердите покупку',buying:'2. Ожидаем исполнения покупки',ordering:d.funding_pending?'2. Переводим USDT на торговый аккаунт':'2. Ожидаем исполнения покупки',bought:'3. BNB куплен — подтвердите вывод',withdrawing:'4. Ожидаем подтверждения вывода биржей',done:'✓ Вывод завершён. Можно запускать следующий перевод.',closed:'Операция закрыта. Проверьте результат ниже.'};
+ if(j.state==='withdrawing'&&!d.withdraw_id)states.withdrawing='Результат отправки неизвестен — нужна сверка';
  let html=`<strong class="${j.state==='done'?'positive':''}">${esc(states[j.state]||j.state)}</strong>`;
  html+=`<p>Сеть: ${esc(typeof d.network==='string'?d.network:'BSC')}<br>Получатель: <span class="binance-address">${esc(d.address||'—')}</span>${d.memo?'<br>Memo: '+esc(d.memo):''}</p>`;
  html+=`<p>Цель: ${esc(d.amount)} USDT<br>Сумма ордера: ${esc(d.total)} USDT`;
@@ -43,9 +44,13 @@ function purchaseRender(s){
  const tx=d.txid||d.withdrawal?.txid;
  if(tx)html+=`<p class="binance-address">Транзакция: ${esc(tx)}</p>`;
  if(d.last_checked)html+=`<p class="muted">Последняя сверка: ${esc(date(d.last_checked))}</p>`;
+ if(d.withdraw_submit_error)html+=`<p class="negative">Ответ при отправке: ${esc(d.withdraw_submit_error)}</p>`;
+ if(j.state==='withdrawing'&&!d.withdraw_id)html+=`<p>Биржа не подтвердила приём заявки. Это не означает, что вывод выполняется или отменён. Проверьте историю выводов на бирже; повторная отправка заблокирована.</p>`;
+ html+=`<p class="muted small">ID операции: ${esc(j.id)}</p>`;
  if(j.error)html+=`<p class="negative">${esc(j.error)}</p>`;
  if(['buying','ordering','withdrawing'].includes(j.state))html+='<p class="muted">Статус обновляется автоматически. Повторная покупка или вывод не отправляются. Закрытие окна не отменяет операцию.</p>';
  $('purchase-content').innerHTML=html;
+ const check=$('purchase-check');check.hidden=!['buying','ordering','withdrawing'].includes(j.state);check.disabled=s.busy;
  const b=$('purchase-next');b.hidden=!['buy-preview','withdraw-preview','plan-error'].includes(s.step);b.disabled=s.busy;
  b.textContent=s.step==='buy-preview'?'Подтвердить покупку':s.step==='plan-error'?'Пересчитать вывод':'Подтвердить вывод BNB';
 }
@@ -89,4 +94,11 @@ async function purchasePoll(){
  }catch(e){purchaseError(s,new Error('Не удалось обновить статус: '+e.message+'. Повторим проверку автоматически.'));}
  finally{s.busy=false;purchaseRender(s);if(s.job.state==='bought')await purchasePlan(s);}
 }
+$('purchase-check').onclick=async()=>{
+ const s=purchaseSession;if(!s||s.busy||!purchaseVisible(s)||!['buying','ordering','withdrawing'].includes(s.job?.state))return;
+ s.busy=true;purchaseRender(s);
+ try{s.job=await api(`${purchaseBase(s.venue)}/${s.job.id}/check`,'POST',{});$('purchase-error').textContent='';}
+ catch(e){purchaseError(s,e);}
+ finally{s.busy=false;purchaseRender(s);if(s.job.state==='bought')await purchasePlan(s);}
+};
 setInterval(purchasePoll,3000);

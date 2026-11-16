@@ -19,6 +19,18 @@ MAX_RESPONSE_BYTES = 32 * 1024 * 1024
 class BinanceError(ValueError):
     pass
 
+class BinanceRequestRejected(BinanceError):
+    """An explicit authentication/time/signature rejection, not an uncertain timeout."""
+    pass
+
+def request_error(code, message):
+    hints = {-2015: 'Проверьте разрешённый IP и права API-ключа.',
+             -2014: 'Проверьте API-ключ.', -1021: 'Проверьте время на сервере.',
+             -1022: 'Проверьте подпись и секрет API-ключа.'}
+    if type(code) is int and code in hints:
+        return BinanceRequestRejected(message + ' ' + hints[code])
+    return BinanceError(message)
+
 class NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, *args, **kwargs):
         return None
@@ -71,7 +83,7 @@ class Client:
                     raise BinanceError('Binance вернул неполный или некорректный JSON (%d байт).' % len(raw)) from None
             if isinstance(data, dict) and data.get('code') not in (None, 0, 200):
                 code = data.get('code')
-                raise BinanceError('Binance отклонил запрос (код %s).' % (code if isinstance(code, int) else 'API'))
+                raise request_error(code, 'Binance отклонил запрос (код %s).' % (code if isinstance(code, int) else 'API'))
             return data
         except BinanceError:
             raise
@@ -84,7 +96,7 @@ class Client:
             detail = ' · код Binance %s' % code if isinstance(code, int) else ''
             if code == 700013:
                 detail += ' · неверный Content-Type'
-            raise BinanceError('Binance HTTP %s%s. Запрос автоматически не повторяется.' % (e.code, detail)) from None
+            raise request_error(code if 400 <= e.code < 500 else None, 'Binance HTTP %s%s. Запрос автоматически не повторяется.' % (e.code, detail)) from None
         except Exception:
             raise BinanceError('Нет достоверного ответа Binance. Операция автоматически не повторяется.') from None
 
@@ -478,6 +490,8 @@ def withdraw_confirm(ident):
     plan = withdrawal_plan(client,d)
     if plan != d.get('withdraw_plan'):
         raise BinanceError('Баланс или комиссия изменились. Пересчитайте вывод.')
+    d.pop('withdraw_submit_error', None)
+    d.pop('withdraw_rejected', None)
     d['withdraw_time'] = time.time()
     with db() as c:
         c.execute('BEGIN IMMEDIATE')
@@ -493,7 +507,13 @@ def withdraw_confirm(ident):
             raise BinanceError('Нет ID вывода. Нужна сверка с биржей.')
         d['withdraw_id']=str(result['id'])
         save(ident,'withdrawing',d)
+    except BinanceRequestRejected as e:
+        d['withdraw_submit_error'] = str(e)
+        d['withdraw_rejected'] = True
+        d.pop('plan_time', None)
+        save(ident,'bought',d,'Заявка вывода отклонена до исполнения. BNB не покупайте повторно. ' + str(e))
     except BinanceError as e:
+        d['withdraw_submit_error'] = str(e)
         save(ident,'withdrawing',d,str(e))
     return get_job(ident)
 
