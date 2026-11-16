@@ -41,13 +41,14 @@ class ManualResolutionTests(BinanceTests):
     def test_closes_only_after_verified_manual_withdrawal(self):
         ident = self.pending()
         manual = self.manual(ident)
+        before_calls = len(self.fake.calls)
         with patch.object(m, 'history', return_value=[manual]), patch.object(m, 'account', return_value={
             'balances': [{'asset': 'BNB', 'free': '0', 'locked': '0'}]
         }):
             result = m.resolve_manual_withdrawal(ident, self.MANUAL_ID)
         self.assertEqual(result['state'], 'closed')
         self.assertEqual(result['data']['manual_resolution']['manual_withdraw_id'], self.MANUAL_ID)
-        self.assertFalse(any(method == 'POST' for _, _, method in self.fake.calls[-2:]))
+        self.assertFalse(any(method == 'POST' for _, _, method in self.fake.calls[before_calls:]))
         with self.assertRaises(m.BinanceError):
             m.resolve_manual_withdrawal(ident, self.MANUAL_ID)
 
