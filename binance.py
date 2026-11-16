@@ -24,7 +24,8 @@ class BinanceRequestRejected(BinanceError):
     pass
 
 def request_error(code, message):
-    hints = {-2015: 'Проверьте разрешённый IP и права API-ключа.',
+    hints = {-1002: 'Проверьте разрешение вывода через API.',
+             -2015: 'Проверьте разрешённый IP и права API-ключа.',
              -2014: 'Проверьте API-ключ.', -1021: 'Проверьте время на сервере.',
              -1022: 'Проверьте подпись и секрет API-ключа.'}
     if type(code) is int and code in hints:
