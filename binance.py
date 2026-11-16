@@ -518,6 +518,72 @@ def withdraw_confirm(ident):
     return get_job(ident)
 
 
+
+def recover_rejected_withdrawal(ident):
+    """Reopen a known HTTP 401/-1002 rejection for a fresh *manual* confirmation.
+
+    This operation only changes local state; it never submits a withdrawal.
+    Unknown/timeout errors remain permanently blocked from automatic retry.
+    """
+    from app import db
+    j = get_job(ident)
+    d = j['data']
+    if j['state'] != 'withdrawing' or d.get('action') == 'sell' or d.get('withdraw_id'):
+        raise BinanceError('Восстановление доступно только для неподтверждённого вывода BNB.')
+    # Legacy jobs submitted before explicit rejection handling were kept as
+    # "withdrawing". A specific 401/-1002 response proves this request was denied.
+    error = str(d.get('withdraw_submit_error') or '')
+    if not re.search(r'Binance HTTP 401\\s*·\\s*код Binance -1002\\b', error):
+        raise BinanceError('Нет подтверждённого отказа Binance 401/-1002. Повторный вывод заблокирован.')
+    submitted = d.get('withdraw_time')
+    if not isinstance(submitted, (int, float)) or not 0 < time.time() - submitted < 6 * 86400:
+        raise BinanceError('Срок безопасной сверки истёк или время заявки неизвестно.')
+    if d.get('network') != 'BSC' or not re.fullmatch(r'0x[0-9a-fA-F]{40}', str(d.get('address') or '')):
+        raise BinanceError('Нельзя подтвердить исходную сеть или адрес.')
+    purchased = dec(d.get('bought'))
+    if purchased <= 0:
+        raise BinanceError('Нет подтверждённого количества купленных BNB.')
+
+    client = Client()
+    restrictions = client.call('/sapi/v1/account/apiRestrictions')
+    if not isinstance(restrictions, dict) or restrictions.get('enableWithdrawals') is not True or restrictions.get('ipRestrict') is not True:
+        raise BinanceError('В Binance вывод через API с ограничением IP должен быть разрешён.')
+
+    # Fail closed when Binance cannot provide the history or full balance.
+    rows = history(client, submitted)
+    if any(r.get('withdrawOrderId') == ident or
+           (r.get('coin') == 'BNB' and r.get('network') == 'BSC' and
+            str(r.get('address', '')).lower() == d['address'].lower())
+           for r in rows):
+        raise BinanceError('Обнаружен возможный вывод на этот адрес. Сначала сверьте его с Binance.')
+    a = account(client)
+    if a.get('canWithdraw') is not True or free(a, 'BNB') < purchased or any(
+            dec(b['locked']) != 0 for b in a['balances'] if b['asset'] == 'BNB'):
+        raise BinanceError('BNB недоступны в полном объёме или вывод запрещён. Повторная отправка заблокирована.')
+
+    with db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        row = c.execute('SELECT state,data FROM binance_jobs WHERE id=?', (ident,)).fetchone()
+        if not row or row['state'] != 'withdrawing':
+            raise BinanceError('Состояние операции изменилось. Повторите проверку.')
+        current = json.loads(row['data'])
+        if (current.get('withdraw_id') or current.get('withdraw_time') != submitted or
+                current.get('withdraw_submit_error') != error):
+            raise BinanceError('Данные заявки изменились. Повторите сверку.')
+        current['rejected_withdrawal_recovery'] = {
+            'time': time.time(), 'original_submit_time': submitted,
+            'original_error': error, 'reason': 'Подтверждённый отказ Binance HTTP 401 / -1002',
+        }
+        current.pop('withdraw_plan', None)
+        current.pop('plan_time', None)
+        current['withdraw_rejected'] = True
+        current['updated'] = time.time()
+        if c.execute("UPDATE binance_jobs SET state='bought',data=?,error=? WHERE id=? AND state='withdrawing'",
+                     (json.dumps(current), 'Первый вывод отклонён Binance. Рассчитайте и подтвердите новый вывод; BNB не покупайте повторно.', ident)).rowcount != 1:
+            raise BinanceError('Не удалось восстановить операцию.')
+    return get_job(ident)
+
+
 def resolve_manual_withdrawal(ident, withdrawal_id):
     """Operator-attested resolution after a separately completed manual withdrawal.
 
@@ -738,6 +804,13 @@ def install(app):
     @app.post('/api/binance/<ident>/withdraw')
     def binance_withdraw(ident):
         return withdraw_confirm(ident)
+
+    @app.post('/api/binance/<ident>/recover-rejected')
+    def binance_recover_rejected(ident):
+        body = request.get_json(silent=True) or {}
+        if body.get('confirmation') != 'RETRY_AFTER_BINANCE_1002':
+            raise BinanceError('Подтвердите повторный расчёт после отказа Binance.')
+        return recover_rejected_withdrawal(ident)
 
     @app.post('/api/binance/<ident>/resolve-manual')
     def binance_resolve_manual(ident):
