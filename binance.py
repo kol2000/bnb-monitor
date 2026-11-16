@@ -552,6 +552,15 @@ def resolve_manual_withdrawal(ident, withdrawal_id):
             not withdrawal_asset_matches(manual, d['network']) or
             manual.get('withdrawOrderId')):
         raise BinanceError('Нужен завершённый ручной вывод BNB/BSC на исходный адрес без ID приложения.')
+    # Reject a previously completed withdrawal unrelated to this blocked job.
+    # Binance applyTime is a UTC timestamp without timezone designation.
+    from datetime import datetime, timezone
+    try:
+        manual_time = datetime.strptime(manual['applyTime'], '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc).timestamp()
+    except (KeyError, TypeError, ValueError):
+        raise BinanceError('Не удалось проверить время ручного вывода Binance.') from None
+    if manual_time < float(d.get('withdraw_time', 0)) - 60:
+        raise BinanceError('Указанный ручной вывод выполнен до зависшей операции.')
 
     a = account(client)
     if free(a, 'BNB') != 0 or any(dec(b['locked']) != 0 for b in a['balances'] if b['asset'] == 'BNB'):
