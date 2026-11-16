@@ -24,6 +24,6 @@ class WithdrawalRejectionTests(BinanceTests):
   self.assertEqual(r['data']['withdraw_submit_error'],'Timeout')
   with self.assertRaises(m.BinanceError):m.withdraw_confirm(j['id'])
  def test_only_allowlisted_request_errors_are_definite_rejections(self):
-  for code in (-2014,-2015,-1021,-1022):self.assertIsInstance(m.request_error(code,'error'),m.BinanceRequestRejected)
+  for code in (-1002,-2014,-2015,-1021,-1022):self.assertIsInstance(m.request_error(code,'error'),m.BinanceRequestRejected)
   for code in (None,-1007,-1006,-1000,500,'-2015'):
    self.assertNotIsInstance(m.request_error(code,'error'),m.BinanceRequestRejected)
