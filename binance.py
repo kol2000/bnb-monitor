@@ -517,6 +517,75 @@ def withdraw_confirm(ident):
         save(ident,'withdrawing',d,str(e))
     return get_job(ident)
 
+
+def resolve_manual_withdrawal(ident, withdrawal_id):
+    """Operator-attested resolution after a separately completed manual withdrawal.
+
+    Never resubmit the uncertain original POST. Require a completed manual
+    Binance withdrawal plus zero spot BNB; preserve original audit fields.
+    """
+    from app import db
+    withdrawal_id = str(withdrawal_id or '').strip()
+    if not re.fullmatch(r'[0-9a-fA-F]{32}', withdrawal_id):
+        raise BinanceError('Укажите ID завершённого ручного вывода из истории Binance.')
+
+    j = get_job(ident)
+    if j['state'] != 'withdrawing' or j['data'].get('action') == 'sell':
+        raise BinanceError('Операция больше не ожидает сверки вывода.')
+    d = j['data']
+    if d.get('withdraw_id'):
+        raise BinanceError('У исходного вывода уже есть ID. Сначала сверьте его с Binance.')
+
+    client = Client()
+    rows = history(client)  # Raises on API failure: never close on missing data.
+    original = [r for r in rows if r.get('withdrawOrderId') == ident or
+                (d.get('withdraw_id') and str(r.get('id')) == d['withdraw_id'])]
+    if original:
+        raise BinanceError('Исходный вывод обнаружен в Binance. Сначала сверьте его статус.')
+
+    matches = [r for r in rows if str(r.get('id')) == withdrawal_id]
+    if len(matches) != 1:
+        raise BinanceError('Ручной вывод не найден в истории Binance за 7 дней.')
+    manual = matches[0]
+    if (int(manual.get('status', -1)) != 6 or
+            str(manual.get('address', '')).lower() != d['address'].lower() or
+            not withdrawal_asset_matches(manual, d['network']) or
+            manual.get('withdrawOrderId')):
+        raise BinanceError('Нужен завершённый ручной вывод BNB/BSC на исходный адрес без ID приложения.')
+    # Reject a previously completed withdrawal unrelated to this blocked job.
+    # Binance applyTime is a UTC timestamp without timezone designation.
+    from datetime import datetime, timezone
+    try:
+        manual_time = datetime.strptime(manual['applyTime'], '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc).timestamp()
+    except (KeyError, TypeError, ValueError):
+        raise BinanceError('Не удалось проверить время ручного вывода Binance.') from None
+    if manual_time < float(d.get('withdraw_time', 0)) - 60:
+        raise BinanceError('Указанный ручной вывод выполнен до зависшей операции.')
+
+    a = account(client)
+    if free(a, 'BNB') != 0 or any(dec(b['locked']) != 0 for b in a['balances'] if b['asset'] == 'BNB'):
+        raise BinanceError('На спотовом балансе остались BNB. Закрытие требует дополнительной сверки.')
+
+    with db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        row = c.execute('SELECT state,data FROM binance_jobs WHERE id=?', (ident,)).fetchone()
+        if not row or row['state'] != 'withdrawing':
+            raise BinanceError('Состояние операции изменилось. Повторите проверку.')
+        current = json.loads(row['data'])
+        if current.get('withdraw_id'):
+            raise BinanceError('У исходного вывода появился ID. Повторите проверку.')
+        current['manual_resolution'] = {
+            'time': time.time(),
+            'reason': 'BNB выведены вручную через Binance',
+            'manual_withdraw_id': withdrawal_id,
+            'manual_txid': manual.get('txId') or '',
+        }
+        current['updated'] = time.time()
+        c.execute("UPDATE binance_jobs SET state='closed',data=?,error=? WHERE id=? AND state='withdrawing'",
+                  (json.dumps(current), 'Закрыто вручную: ручной вывод подтверждён Binance; исходная заявка не найдена.', ident))
+    return get_job(ident)
+
+
 def sell_plan(client):
     a = account(client)
     if a.get('canTrade') is not True:
@@ -669,6 +738,13 @@ def install(app):
     @app.post('/api/binance/<ident>/withdraw')
     def binance_withdraw(ident):
         return withdraw_confirm(ident)
+
+    @app.post('/api/binance/<ident>/resolve-manual')
+    def binance_resolve_manual(ident):
+        body = request.get_json(silent=True) or {}
+        if body.get('confirmation') != 'MANUAL_WITHDRAWAL_COMPLETED':
+            raise BinanceError('Подтвердите, что вывод был завершён вручную.')
+        return resolve_manual_withdrawal(ident, body.get('withdrawal_id'))
 
     @app.post('/api/binance/<ident>/keep')
     def binance_keep(ident):
