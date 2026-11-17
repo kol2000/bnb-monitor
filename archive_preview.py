@@ -49,13 +49,18 @@ def schema(conn):
         cursor_block INTEGER,
         direction INTEGER NOT NULL DEFAULT 0,
         requests INTEGER NOT NULL DEFAULT 0,
-        window_blocks INTEGER NOT NULL DEFAULT 100000
+        window_blocks INTEGER NOT NULL DEFAULT 100000,
+        scan_method TEXT NOT NULL DEFAULT 'transfers'
     )""")
     # Existing production SQLite tables were created before window_blocks.
     if 'window_blocks' not in {r['name'] for r in conn.execute(
             'PRAGMA table_info(archive_activity_preview)')}:
         conn.execute('ALTER TABLE archive_activity_preview '
                      'ADD COLUMN window_blocks INTEGER NOT NULL DEFAULT 100000')
+    if 'scan_method' not in {r['name'] for r in conn.execute(
+            'PRAGMA table_info(archive_activity_preview)')}:
+        conn.execute("ALTER TABLE archive_activity_preview ADD COLUMN scan_method "
+                     "TEXT NOT NULL DEFAULT 'transfers'")
 
 
 def key_from_file():
@@ -202,14 +207,14 @@ def safe_tip():
 def start_wallet(conn, wallet, tip, stamp, cutoff):
     conn.execute("""INSERT INTO archive_activity_preview
         (wallet_id,address,checked_at,decision,detail,cutoff_block,
-         tip_block,tip_timestamp,cursor_block,direction,requests,window_blocks)
-        VALUES(?,?,?,'scanning','Сканирование 90 дней',?,?,?,?,0,0,100000)
+         tip_block,tip_timestamp,cursor_block,direction,requests,window_blocks,scan_method)
+        VALUES(?,?,?,'scanning','Сканирование 90 дней',?,?,?,?,0,0,100000,'count')
         ON CONFLICT(wallet_id) DO UPDATE SET
         address=excluded.address,checked_at=excluded.checked_at,
         last_activity=NULL,decision='scanning',detail='Сканирование 90 дней',
         cutoff_block=excluded.cutoff_block,tip_block=excluded.tip_block,
         tip_timestamp=excluded.tip_timestamp,cursor_block=excluded.cursor_block,
-        direction=0,requests=0,window_blocks=100000""",
+        direction=0,requests=0,window_blocks=100000,scan_method='count'""",
         (wallet['id'],wallet['address'],time.time(),cutoff,tip,stamp,tip))
 
 
@@ -351,6 +356,12 @@ def scan(limit=1, requests=20, sleeper=time.sleep, wallet_id=None):
             schema(conn)
             row = conn.execute('SELECT * FROM archive_activity_preview WHERE wallet_id=?',
                                (wallet['id'],)).fetchone()
+            if row is not None and row['scan_method'] != 'count':
+                # Transfer-list absence was not independently validated. Recheck
+                # from tip using the count API before making any candidate claim.
+                start_wallet(conn,wallet,tip,tip_stamp,cutoff)
+                row = conn.execute('SELECT * FROM archive_activity_preview WHERE wallet_id=?',
+                                   (wallet['id'],)).fetchone()
             resume_old_failure = (row is not None and row['address'] == wallet['address']
                 and row['decision'] == 'unknown'
                 and row['detail'] == 'Ошибка NodeReal; сканирование не подтверждено'
