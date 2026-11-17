@@ -87,6 +87,68 @@ class ArchivePreviewTests(unittest.TestCase):
         self.assertEqual(r['failed'],1)
         self.assertEqual(preview.report()[0]['decision'],'scanning')
 
+    def test_existing_preview_table_gains_window_column(self):
+        with app.db() as c:
+            c.execute('DROP TABLE archive_activity_preview')
+            c.execute("""CREATE TABLE archive_activity_preview (
+                wallet_id INTEGER PRIMARY KEY, address TEXT NOT NULL,
+                checked_at REAL, last_activity REAL, decision TEXT NOT NULL,
+                detail TEXT NOT NULL, cutoff_block INTEGER, tip_block INTEGER,
+                tip_timestamp REAL, cursor_block INTEGER, direction INTEGER,
+                requests INTEGER)""")
+            c.execute("""INSERT INTO archive_activity_preview
+                (wallet_id,address,decision,detail,requests,cursor_block)
+                VALUES (37,?,'scanning','previous state',68,127285013)""",
+                (base.A,))
+            preview.schema(c)
+            row=c.execute('SELECT requests,cursor_block,window_blocks FROM '
+                          'archive_activity_preview WHERE wallet_id=37').fetchone()
+        self.assertEqual(row['requests'],68)
+        self.assertEqual(row['cursor_block'],127285013)
+        self.assertEqual(row['window_blocks'],100000)
+
+    def test_timeout_adapts_window_and_checkpoints_only_successful_range(self):
+        with app.db() as c:
+            wallet=dict(c.execute('SELECT * FROM wallets').fetchone())
+            preview.start_wallet(c,wallet,tip=200000,stamp=time.time(),cutoff=1)
+            row=dict(c.execute('SELECT * FROM archive_activity_preview').fetchone())
+        sizes=[]
+        def fake_rpc(method,params):
+            low=int(params[0]['fromBlock'],16)
+            high=int(params[0]['toBlock'],16)
+            sizes.append(high-low)
+            if len(sizes)<3:
+                raise preview.IndexerError('NodeReal timed out on both read attempts')
+            return {'transfers':[]}
+        with patch.object(preview,'rpc',side_effect=fake_rpc):
+            self.assertEqual(preview.step(wallet,row),'scanning')
+        self.assertEqual(sizes,[100000,25000,5000])
+        with app.db() as c:
+            saved=c.execute('SELECT cursor_block,window_blocks,requests '
+                            'FROM archive_activity_preview WHERE wallet_id=?',
+                            (wallet['id'],)).fetchone()
+        self.assertEqual(saved['cursor_block'],194999)
+        self.assertEqual(saved['window_blocks'],5000)
+        self.assertEqual(saved['requests'],1)
+
+    def test_non_timeout_rpc_error_never_reduces_window(self):
+        with app.db() as c:
+            wallet=dict(c.execute('SELECT * FROM wallets').fetchone())
+            preview.start_wallet(c,wallet,tip=200000,stamp=time.time(),cutoff=1)
+            row=dict(c.execute('SELECT * FROM archive_activity_preview').fetchone())
+        with patch.object(preview,'rpc',
+                          side_effect=preview.IndexerError('NodeReal JSON-RPC code -32602: bad params')) as mocked:
+            with self.assertRaises(preview.IndexerError):
+                preview.step(wallet,row)
+        mocked.assert_called_once()
+        with app.db() as c:
+            saved=c.execute('SELECT cursor_block,window_blocks,requests '
+                            'FROM archive_activity_preview WHERE wallet_id=?',
+                            (wallet['id'],)).fetchone()
+        self.assertEqual(saved['cursor_block'],200000)
+        self.assertEqual(saved['window_blocks'],100000)
+        self.assertEqual(saved['requests'],0)
+
     def test_timeout_retried_once_without_exposing_key(self):
         with patch.object(preview,'key_from_file',return_value='private-secret'):
             calls=[]
