@@ -53,7 +53,7 @@ def retry_rpc_read(url, method, params, on_recovered=None):
     try:
         return rpc(url, method, params)
     except RemoteError as exc:
-        if 'Тайм-аут подключения к сервису' not in str(exc):
+        if not any(marker in str(exc) for marker in ('Тайм-аут подключения к сервису', 'Ошибка соединения: TimeoutError')):
             raise
         if stop.is_set():
             raise
