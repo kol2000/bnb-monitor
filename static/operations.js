@@ -1,5 +1,13 @@
 'use strict';
 let operationsPolling=false, currentOutboundIP=null;
+let dismissedIPWarning = null;
+const dismissedIPStorageKey = 'bnb-monitor-dismissed-ip-change-v1';
+try { dismissedIPWarning = localStorage.getItem(dismissedIPStorageKey); } catch {}
+function changedIPWarningKey(ip) {
+ if (!ip.changed || !ip.expected || !ip.current) return null;
+ return ip.expected + ' → ' + ip.current;
+}
+
 const connectionNames={binance:'Binance · напрямую',telegram:'Telegram · маршрут приложения',rpc:'BSC RPC',google:'Google Таблицы'};
 function renderOperations(data){
  $('connection-status').innerHTML=Object.entries(connectionNames).map(([key,label])=>{
@@ -10,8 +18,9 @@ function renderOperations(data){
  $('diagnostics-check').textContent=data.running?'Проверяем…':'Проверить подключения';
  const ip=data.ip||{};currentOutboundIP=ip.current;
  $('outbound-ip').textContent=`Прямой внешний IPv4: ${ip.current||'—'} · сохранённый: ${ip.expected||'—'} · ${date(ip.checked)}${ip.error?' · '+ip.error:''}`;
- $('ip-warning').hidden=!ip.changed;
- $('ip-warning').textContent=`Внешний IP изменился: ${ip.expected} → ${ip.current}. Проверьте разрешённые IP API-ключа Binance. Приложение не меняет список доступа биржи.`;
+ const ipChangeKey=changedIPWarningKey(ip);
+ $('ip-warning').hidden=!ip.changed||!!(ipChangeKey && dismissedIPWarning===ipChangeKey);
+ $('ip-warning-text').textContent=`Внешний IP изменился: ${ip.expected} → ${ip.current}. Проверьте разрешённые IP API-ключа Binance. Приложение не меняет список доступа биржи.`;
  $('ip-acknowledge').hidden=!ip.changed||!!ip.error;
  $('priority-status').textContent=data.priority.length?`Приоритетная проверка балансов: в очереди ${data.priority.length}${data.priority.length===20?' или больше':''}. ${data.priority.find(x=>x.error)?.error||''}`:'Очередь приоритетных проверок пуста.';
  const b=data.backup||{};
@@ -27,6 +36,18 @@ async function refreshOperations(){
 $('diagnostics-check').onclick=async()=>{
  $('diagnostics-check').disabled=true;
  try{await api('diagnostics','POST',{});toast('Проверка подключений запрошена.');}catch(e){toast(e.message,true);$('diagnostics-check').disabled=false;}
+};
+$('ip-warning-dismiss').onclick=()=>{
+ const ip=currentOutboundIP;
+ // Dismiss only the current warning in this browser. Never change the
+ // expected IP or Binance permissions; a *new* change will show again.
+ const message=$('ip-warning-text').textContent;
+ const match=message.match(/^Внешний IP изменился: (.+?) → (.+?)\\./);
+ const key=match ? match[1]+' → '+match[2] : null;
+ if(!key || !ip)return;
+ dismissedIPWarning=key;
+ try { localStorage.setItem(dismissedIPStorageKey, key); } catch {}
+ $('ip-warning').hidden=true;
 };
 $('ip-acknowledge').onclick=async()=>{
  const approvedIP=currentOutboundIP;
