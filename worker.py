@@ -41,6 +41,86 @@ def refresh_price():
         # Preserve the previous quote and its original timestamp on any failure.
         set_status(price_error='Не удалось обновить курс CoinMarketCap.')
 
+FINALIZED_CACHE_SECONDS = 5.0
+FINALIZED_CACHE_MAX_USES = 8
+
+
+class FinalizedBlockCache:
+    """Short-lived, endpoint-local finalized height for balance reads.
+
+    A bounded cache avoids fetching the same finalized block per asset.
+    Invalidate and retry a *read* once if the provider rejects cached state.
+    """
+
+    def __init__(self, url):
+        self.url = url
+        self.height = None
+        self.timestamp = None
+        self.fetched_at = 0.0
+        self.uses = 0
+
+    def invalidate(self):
+        self.height = None
+        self.timestamp = None
+        self.uses = 0
+
+    def get(self):
+        now = time.monotonic()
+        if (self.height is not None
+                and now - self.fetched_at < FINALIZED_CACHE_SECONDS
+                and self.uses < FINALIZED_CACHE_MAX_USES
+                and abs(time.time() - self.timestamp) <= 180):
+            self.uses += 1
+            return self.height, True
+        self.invalidate()
+        block = rpc(self.url, 'eth_getBlockByNumber', ['finalized', False])
+        if not isinstance(block, dict):
+            raise RemoteError('RPC не поддерживает finalized. Укажите другой RPC.')
+        try:
+            height = int(block['number'], 16)
+            timestamp = int(block['timestamp'], 16)
+        except (KeyError, TypeError, ValueError):
+            raise RemoteError('RPC вернул некорректный финализированный блок.') from None
+        if height < 0 or abs(time.time() - timestamp) > 180:
+            raise RemoteError('RPC отстаёт более чем на 3 минуты или часы сервера неверны.')
+        self.height = height
+        self.timestamp = timestamp
+        self.fetched_at = time.monotonic()
+        self.uses = 1
+        return height, False
+
+
+def finalized_asset_sample(cache, w, asset, block_col):
+    """Read at an explicit finalized height; retry once on cached-state failure."""
+    for attempt in range(2):
+        height, reused = cache.get()
+        prior = w[block_col]
+        if prior is not None and height < prior:
+            # A previous endpoint (or manual check) advanced farther.
+            # Refresh a reused height before failing over to the next RPC.
+            if reused and attempt == 0:
+                cache.invalidate()
+                continue
+            raise RemoteError('RPC отстаёт от ранее проверенного блока.')
+        if prior is not None and height == prior:
+            return height, None
+        try:
+            if asset == 'USDT':
+                amount = usdt_balance(rpc, cache.url, w['address'], hex(height))
+            else:
+                raw = rpc(cache.url, 'eth_getBalance', [w['address'], hex(height)])
+                if not isinstance(raw, str) or not raw.startswith('0x'):
+                    raise RemoteError('RPC вернул некорректный баланс.')
+                amount = int(raw, 16)
+            return height, amount
+        except RemoteError:
+            if reused and attempt == 0:
+                cache.invalidate()
+                continue
+            raise
+    raise RemoteError('Не удалось прочитать баланс с финализированного блока.')
+
+
 def check_once():
     cfg = settings()
     started = time.time()
@@ -74,6 +154,7 @@ def check_once():
                 if int(rpc(url, 'eth_chainId', []), 16) != 56:
                     raise RemoteError('RPC подключён не к BSC mainnet (chain ID 56).')
                 token_verified = False
+                finalized_cache = FinalizedBlockCache(url)
                 for (wid, asset), w in list(remaining.items()):
                     balance_col, block_col, checked_col, error_col = ASSET_FIELDS[asset]
                     if stop.is_set():
@@ -83,27 +164,11 @@ def check_once():
                         if asset == 'USDT' and not token_verified:
                             usdt_decimals(rpc, url)
                             token_verified = True
-                        # Public RPCs may discard old state during a long wallet sweep.
-                        # Keep the balance tied to an explicit, freshly finalized height.
-                        block = rpc(url, 'eth_getBlockByNumber', ['finalized', False])
-                        if not isinstance(block, dict):
-                            raise RemoteError('RPC не поддерживает finalized. Укажите другой RPC.')
-                        height = int(block['number'], 16)
-                        if abs(time.time() - int(block['timestamp'], 16)) > 180:
-                            raise RemoteError('RPC отстаёт более чем на 3 минуты или часы сервера неверны.')
-                        if w[block_col] is not None and height < w[block_col]:
-                            raise RemoteError('RPC отстаёт от ранее проверенного блока.')
-                        if w[block_col] is not None and height == w[block_col]:
+                        height, amount = finalized_asset_sample(finalized_cache, w, asset, block_col)
+                        if amount is None:
                             with db() as c:
                                 c.execute(f'UPDATE wallets SET {checked_col}=?,{error_col}=NULL WHERE id=?', (time.time(), wid))
                         else:
-                            if asset == 'USDT':
-                                amount = usdt_balance(rpc, url, w['address'], hex(height))
-                            else:
-                                raw = rpc(url, 'eth_getBalance', [w['address'], hex(height)])
-                                if not isinstance(raw, str) or not raw.startswith('0x'):
-                                    raise RemoteError('RPC вернул некорректный баланс.')
-                                amount = int(raw, 16)
                             record_balance(wid, amount, height, cfg, asset)
                         consecutive = 0
                         rpc_health[key] = {'failures': 0, 'until': 0}

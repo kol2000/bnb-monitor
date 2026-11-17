@@ -182,6 +182,81 @@ class MonitorTests(unittest.TestCase):
         self.assertIsNone(state['status']['error'])
         self.assertFalse(state['status']['running'])
 
+    def test_finalized_block_cache_reuses_height_for_multiple_wallets_and_assets(self):
+        self.wallet()
+        self.post('wallets', {'wallets': [{'address': B, 'name': 'Second'}]})
+        self.post('settings', {'usdt_enabled': True})
+        calls = []
+        def fake_rpc(url, method, params):
+            calls.append((method, params))
+            if method == 'eth_chainId': return '0x38'
+            if method == 'eth_getBlockByNumber':
+                return {'number': '0x100', 'timestamp': hex(int(time.time()))}
+            if method == 'eth_call':
+                if params[0]['data'] == '0x313ce567':
+                    return '0x' + format(18, '064x')
+                self.assertEqual(params[1], '0x100')
+                return '0x' + format(0, '064x')
+            if method == 'eth_getBalance':
+                self.assertEqual(params[1], '0x100')
+                return '0x0'
+            raise AssertionError(method)
+        with patch('worker.rpc', side_effect=fake_rpc), patch.object(worker.stop, 'wait'):
+            worker.check_once()
+        self.assertEqual(sum(method == 'eth_getBlockByNumber' for method, _ in calls), 1)
+        self.assertEqual(sum(method == 'eth_getBalance' for method, _ in calls), 2)
+        self.assertEqual(sum(method == 'eth_call' for method, _ in calls), 3)
+        with mod.db() as c:
+            rows = c.execute('SELECT block,usdt_block,error,usdt_error FROM wallets').fetchall()
+        self.assertTrue(all(r['block'] == 256 and r['usdt_block'] == 256
+                            and r['error'] is None and r['usdt_error'] is None for r in rows))
+
+    def test_finalized_block_cache_refreshes_after_ttl(self):
+        heights = iter([256, 257])
+        cache = worker.FinalizedBlockCache('https://one.example')
+        with patch('worker.rpc', side_effect=lambda *args: {
+                'number': hex(next(heights)), 'timestamp': hex(int(time.time()))}), \
+             patch('worker.time.monotonic', side_effect=[1, 1, 7, 7]):
+            self.assertEqual(cache.get(), (256, False))
+            self.assertEqual(cache.get(), (257, False))
+
+    def test_finalized_cache_refreshes_when_provider_rejects_old_state(self):
+        wallet_id = self.wallet()
+        self.post('wallets', {'wallets': [{'address': B, 'name': 'Second'}]})
+        block_height = 256
+        calls = []
+        def fake_rpc(url, method, params):
+            nonlocal block_height
+            calls.append(method)
+            if method == 'eth_chainId': return '0x38'
+            if method == 'eth_getBlockByNumber':
+                return {'number': hex(block_height), 'timestamp': hex(int(time.time()))}
+            if method == 'eth_getBalance':
+                if params[0].lower() == B and int(params[1], 16) == 256:
+                    block_height = 257
+                    raise mod.RemoteError('historical state unavailable')
+                return '0x7'
+            raise AssertionError(method)
+        with patch('worker.rpc', side_effect=fake_rpc), patch.object(worker.stop, 'wait'):
+            worker.check_once()
+        self.assertEqual(calls.count('eth_getBlockByNumber'), 2)
+        with mod.db() as c:
+            rows = c.execute('SELECT address,block,error FROM wallets ORDER BY id').fetchall()
+        self.assertEqual([(r['block'], r['error']) for r in rows], [(256, None), (257, None)])
+
+    def test_finalized_cache_respects_previous_block_on_cached_height(self):
+        cache = worker.FinalizedBlockCache('https://one.example')
+        now = int(time.time())
+        def fake_rpc(url, method, params):
+            if method == 'eth_getBlockByNumber':
+                return {'number': '0x101', 'timestamp': hex(now)}
+            return '0x7'
+        w = {'block': 256, 'address': A}
+        with patch('worker.rpc', side_effect=fake_rpc):
+            self.assertEqual(worker.finalized_asset_sample(cache, w, 'BNB', 'block'), (257, 7))
+            w['block'] = 257
+            self.assertEqual(worker.finalized_asset_sample(cache, w, 'BNB', 'block'), (257, None))
+
     def test_sweep_survives_provider_discarding_old_state(self):
         self.wallet()
         self.post('wallets', {'wallets': [{'address': B, 'name': 'Second'}]})
