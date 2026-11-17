@@ -9,10 +9,12 @@ import app
 import worker
 
 
-class RpcLiveStatsTests(MonitorTests):
+class RpcLiveStatsTests(unittest.TestCase):
     def test_live_provider_stats_every_ten_attempts(self):
+        fixture = MonitorTests()
+        fixture.setUp()
         addresses = ['0x' + format(n, '040x') for n in range(1, 13)]
-        response = self.post('wallets', {'wallets': [
+        response = fixture.post('wallets', {'wallets': [
             {'address': address, 'name': f'Wallet {n}'}
             for n, address in enumerate(addresses)
         ]})
@@ -34,8 +36,8 @@ class RpcLiveStatsTests(MonitorTests):
                 return '0x10'
             raise AssertionError(method)
 
-        with patch.object(worker, 'rpc', side_effect=fake_rpc), \\
-             patch.object(worker, 'set_status', side_effect=capture), \\
+        with patch.object(worker, 'rpc', side_effect=fake_rpc), \
+             patch.object(worker, 'set_status', side_effect=capture), \
              patch.object(worker.stop, 'wait'):
             worker.check_once()
 
