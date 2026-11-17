@@ -118,8 +118,10 @@ def check_once():
                             failures = min(health.get('failures', 0) + 1, 5)
                             rpc_health[key] = {'failures': failures, 'until': time.time()+min(300, 15*2**failures)}
                             break
-                    # Pace public RPC requests: one second plus response time per wallet.
-                    stop.wait(min(8.0, 2.0 ** consecutive))
+                    # Keep backoff on consecutive RPC failures; successful requests
+                    # use a configurable delay to balance speed and public-RPC quotas.
+                    delay = cfg['rpc_success_delay'] if consecutive == 0 else min(8.0, 2.0 ** consecutive)
+                    stop.wait(delay)
             except (RemoteError, ValueError, KeyError, TypeError) as exc:
                 last_error = str(exc) if isinstance(exc, RemoteError) else 'Некорректный ответ RPC.'
                 failures = min(health.get('failures', 0) + 1, 5)
