@@ -22,6 +22,7 @@ KINDS = ['external', 'internal', '20', '721', '1155']
 DIRECTIONS = ('fromAddress', 'toAddress')
 DAYS = 90
 WINDOW = 100000  # NodeReal maximum difference between fromBlock and toBlock
+FALLBACK_WINDOWS = (100000, 25000, 5000)  # Bound expensive retries; never 1000-by-default
 INDEXER_LAG_BLOCKS = 50000  # Do not read blocks near head: observed blockNum not reached
 MAX_TIP_AGE = 86400
 ADDRESS = re.compile(r'^0x[0-9a-fA-F]{40}$')
@@ -46,8 +47,14 @@ def schema(conn):
         tip_timestamp REAL,
         cursor_block INTEGER,
         direction INTEGER NOT NULL DEFAULT 0,
-        requests INTEGER NOT NULL DEFAULT 0
+        requests INTEGER NOT NULL DEFAULT 0,
+        window_blocks INTEGER NOT NULL DEFAULT 100000
     )""")
+    # Existing production SQLite tables were created before window_blocks.
+    if 'window_blocks' not in {r['name'] for r in conn.execute(
+            'PRAGMA table_info(archive_activity_preview)')}:
+        conn.execute('ALTER TABLE archive_activity_preview '
+                     'ADD COLUMN window_blocks INTEGER NOT NULL DEFAULT 100000')
 
 
 def key_from_file():
@@ -194,14 +201,14 @@ def safe_tip():
 def start_wallet(conn, wallet, tip, stamp, cutoff):
     conn.execute("""INSERT INTO archive_activity_preview
         (wallet_id,address,checked_at,decision,detail,cutoff_block,
-         tip_block,tip_timestamp,cursor_block,direction,requests)
-        VALUES(?,?,?,'scanning','Сканирование 90 дней',?,?,?,?,0,0)
+         tip_block,tip_timestamp,cursor_block,direction,requests,window_blocks)
+        VALUES(?,?,?,'scanning','Сканирование 90 дней',?,?,?,?,0,0,100000)
         ON CONFLICT(wallet_id) DO UPDATE SET
         address=excluded.address,checked_at=excluded.checked_at,
         last_activity=NULL,decision='scanning',detail='Сканирование 90 дней',
         cutoff_block=excluded.cutoff_block,tip_block=excluded.tip_block,
         tip_timestamp=excluded.tip_timestamp,cursor_block=excluded.cursor_block,
-        direction=0,requests=0""",
+        direction=0,requests=0,window_blocks=100000""",
         (wallet['id'],wallet['address'],time.time(),cutoff,tip,stamp,tip))
 
 
@@ -209,12 +216,38 @@ def step(wallet, row):
     """One transfer API call, followed by a checkpoint in SQLite."""
     direction = DIRECTIONS[row['direction']]
     high = row['cursor_block']
-    low = max(row['cutoff_block'], high-WINDOW)
-    params = {'category': KINDS, direction: wallet['address'],
-              'fromBlock':hex(low),'toBlock':hex(high),
-              'order':'desc','maxCount':'0x1','excludeZeroValue':False}
-    result = rpc('nr_getAssetTransfers',[params])
-    activity = transfer_result(result,wallet['address'],direction,low,high)
+    requested_window = row['window_blocks'] if 'window_blocks' in row.keys() else WINDOW
+    if requested_window not in FALLBACK_WINDOWS:
+        raise IndexerError('Invalid saved archive scan window')
+    position = FALLBACK_WINDOWS.index(requested_window)
+    # On a persistent timeout, retry the SAME high block with a smaller
+    # contiguous window. Never advance cursor until an entire window succeeds.
+    for index in range(position, len(FALLBACK_WINDOWS)):
+        current_window = FALLBACK_WINDOWS[index]
+        low = max(row['cutoff_block'], high-current_window)
+        params = {'category': KINDS, direction: wallet['address'],
+                  'fromBlock':hex(low),'toBlock':hex(high),
+                  'order':'desc','maxCount':'0x1','excludeZeroValue':False}
+        try:
+            result = rpc('nr_getAssetTransfers',[params])
+            break
+        except IndexerError as exc:
+            if 'timed out on both read attempts' not in str(exc):
+                raise
+            if index == len(FALLBACK_WINDOWS)-1:
+                raise IndexerError('NodeReal timed out even on 5000 blocks') from None
+            next_window = FALLBACK_WINDOWS[index+1]
+            with db() as conn:
+                live = conn.execute('SELECT address FROM wallets WHERE id=?',
+                                    (wallet['id'],)).fetchone()
+                if not live or live['address'] != wallet['address']:
+                    raise IndexerError('Wallet removed during scan')
+                conn.execute('UPDATE archive_activity_preview SET window_blocks=?, '
+                             'detail=? WHERE wallet_id=?',
+                             (next_window,
+                              'NodeReal timeout: reduced range to '+str(next_window),
+                              wallet['id']))
+        activity = transfer_result(result,wallet['address'],direction,low,high)
     with db() as conn:
         live = conn.execute('SELECT address FROM wallets WHERE id=?',
                             (wallet['id'],)).fetchone()
