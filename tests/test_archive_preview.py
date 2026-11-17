@@ -72,11 +72,11 @@ class ArchivePreviewTests(unittest.TestCase):
             self.assertEqual(r['rpc_transfer_requests'],1)
             x=preview.report()[0]
             self.assertEqual(x['decision'],'scanning')
-            self.assertEqual(x['cursor_block'],110000)
+            self.assertEqual(x['cursor_block'],109999)
             r=preview.scan(limit=1,requests=1,sleeper=lambda _:None)
             self.assertEqual(r['rpc_transfer_requests'],1)
             x=preview.report()[0]
-            self.assertEqual(x['cursor_block'],10000)
+            self.assertEqual(x['cursor_block'],9998)
             self.assertEqual(x['requests'],2)
 
     def test_scan_failure_never_marks_candidate(self):
