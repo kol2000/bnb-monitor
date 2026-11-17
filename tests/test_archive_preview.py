@@ -15,13 +15,11 @@ def item(at):
 
 class ArchivePreviewTests(unittest.TestCase):
     def setUp(self):
-        base.MonitorTests().setUp()
         self.fixture = base.MonitorTests()
-        self.fixture.client = app.app.test_client()
-        self.fixture.csrf = self.fixture.client.get('/api/session').json['csrf']
-        response = self.fixture.post('login', {'password': 'test-password-only-123'})
-        self.fixture.csrf = response.json['csrf']
-        assert response.status_code == 200
+        self.fixture.setUp()
+        with app.db() as c:
+            preview.schema(c)
+            c.execute('DELETE FROM archive_activity_preview')
         self.fixture.wallet()
 
     def test_old_activity_candidate_after_three_complete_categories(self):
