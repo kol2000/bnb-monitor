@@ -1,3 +1,4 @@
+import math
 import hashlib
 import gzip
 import io
@@ -34,7 +35,7 @@ import operations
 DATA = Path(os.environ.get('DATA_DIR', '/data'))
 DATA.mkdir(parents=True, exist_ok=True)
 DB = DATA / 'monitor.db'
-DEFAULTS = {'interval': 30, 'threshold': '0.00000001', 'telegram_enabled': False,
+DEFAULTS = {'interval': 30, 'rpc_success_delay': 0.2, 'threshold': '0.00000001', 'telegram_enabled': False,
             'telegram_token': '', 'telegram_chat': '',
             'rpc_urls': ['https://bsc-dataseed-public.bnbchain.org'],
             'sheets_enabled': False, 'sheets_id': '', 'sheets_tab': 'Кошельки',
@@ -516,6 +517,13 @@ def save_settings():
         raise ValueError('Интервал должен быть целым числом.')
     if not 10 <= interval <= 3600:
         raise ValueError('Интервал: от 10 до 3600 секунд.')
+    raw_rpc_delay = data.get('rpc_success_delay', cfg['rpc_success_delay'])
+    try:
+        rpc_success_delay = float(raw_rpc_delay)
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError('Задержка RPC: выберите 0.2, 0.5 или 1 секунду.') from None
+    if not math.isfinite(rpc_success_delay) or rpc_success_delay not in (0.2, 0.5, 1.0):
+        raise ValueError('Задержка RPC: выберите 0.2, 0.5 или 1 секунду.')
     threshold = str(data.get('threshold', cfg['threshold']))
     threshold_wei(threshold)
     usdt_threshold = str(data.get('usdt_threshold', cfg['usdt_threshold']))
@@ -569,7 +577,7 @@ def save_settings():
         if data.get('confirm_destination') != withdraw_settings['withdraw_destination']:
             raise ValueError('Подтвердите новый полный адрес депозита Binance.')
     email_cfg = validate_settings(data, cfg)
-    cfg.update(usdt_enabled=usdt_enabled, usdt_threshold=usdt_threshold, interval=interval, threshold=threshold, rpc_urls=urls, telegram_enabled=enabled,
+    cfg.update(usdt_enabled=usdt_enabled, usdt_threshold=usdt_threshold, interval=interval, rpc_success_delay=rpc_success_delay, threshold=threshold, rpc_urls=urls, telegram_enabled=enabled,
                telegram_token=token, telegram_chat=chat, sheets_enabled=sheets_enabled,
                sheets_id=sheets_id, sheets_tab=sheets_tab, sheets_interval=sheets_interval)
     digest = data.get('telegram_digest', cfg.get('telegram_digest', False))

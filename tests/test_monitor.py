@@ -40,6 +40,20 @@ class MonitorTests(unittest.TestCase):
         with mod.db() as c:
             return [dict(r) for r in c.execute('SELECT * FROM events ORDER BY id')]
 
+    def test_rpc_delay_default_and_setting(self):
+        self.assertEqual(mod.settings()['rpc_success_delay'], 0.2)
+        self.assertEqual(self.post('settings', {'rpc_success_delay': 0.5}).status_code, 200)
+        self.assertEqual(mod.settings()['rpc_success_delay'], 0.5)
+        self.assertEqual(self.post('settings', {'rpc_success_delay': 1}).status_code, 200)
+        self.assertEqual(mod.settings()['rpc_success_delay'], 1.0)
+
+    def test_rpc_delay_rejects_invalid_values_without_change(self):
+        for invalid in (0, -1, 0.3, 2, 'nan', 'inf', 'bad', None):
+            with self.subTest(value=invalid):
+                response = self.post('settings', {'rpc_success_delay': invalid})
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(mod.settings()['rpc_success_delay'], 0.2)
+
     def test_auth_and_csrf(self):
         other=mod.app.test_client()
         self.assertEqual(other.get('/api/state').status_code,401)
