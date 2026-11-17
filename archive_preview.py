@@ -61,6 +61,17 @@ def key_from_file():
     return key
 
 
+def safe_api_error_message(message, key):
+    """Redact credentials, URLs and addresses from a short remote diagnostic."""
+    value = str(message).replace(key, '[API_KEY]')
+    value = re.sub(r'https?://[^\\s\\x00-\\x20]+', '[URL]', value, flags=re.I)
+    value = re.sub(r'0x[0-9a-fA-F]{40,}', '[ADDRESS_OR_HEX]', value)
+    value = re.sub(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}', '[EMAIL]', value)
+    value = re.sub(r'(?<![A-Za-z0-9_])[A-Za-z0-9_-]{24,}(?![A-Za-z0-9_])', '[TOKEN]', value)
+    value = re.sub(r'[\\x00-\\x1f\\x7f]', ' ', value)
+    return value[:180]
+
+
 def rpc(method, params, *, opener=urlopen):
     if method not in ('eth_chainId','eth_blockNumber','eth_getBlockByNumber','nr_getAssetTransfers'):
         raise ValueError('Not a permitted read-only RPC method')
@@ -83,10 +94,12 @@ def rpc(method, params, *, opener=urlopen):
                 raise IndexerError('NodeReal invalid JSON-RPC envelope')
             if value.get('error'):
                 error = value['error']
-                # Do not echo remote error message: it could contain the URL/key.
                 code = error.get('code') if isinstance(error, dict) else None
-                raise IndexerError('NodeReal JSON-RPC rejected request (code: ' +
-                                   str(code if isinstance(code, int) else 'unknown') + ')')
+                raw_message = error.get('message', '') if isinstance(error, dict) else ''
+                safe_message = safe_api_error_message(raw_message, key)
+                raise IndexerError('NodeReal JSON-RPC code ' +
+                                   str(code if isinstance(code, int) else 'unknown') +
+                                   (': ' + safe_message if safe_message else ''))
             if 'result' not in value:
                 raise IndexerError('NodeReal response has no result')
             return value['result']
@@ -245,6 +258,7 @@ def scan(limit=1, requests=20, sleeper=time.sleep, wallet_id=None):
     now = time.time()
     cutoff = find_cutoff(tip,now)
     used = 0
+    last_error = None
     completed = {'active':0,'candidate':0,'unknown':0,'failed':0}
     with db() as conn:
         schema(conn)
@@ -308,7 +322,8 @@ def scan(limit=1, requests=20, sleeper=time.sleep, wallet_id=None):
         while used < requests:
             try:
                 outcome = step(wallet,row)
-            except (IndexerError,ValueError,TypeError,KeyError):
+            except (IndexerError,ValueError,TypeError,KeyError) as exc:
+                last_error = str(exc) if isinstance(exc, IndexerError) else type(exc).__name__
                 # Keep the cursor unchanged. No false candidate on an API error.
                 with db() as conn:
                     conn.execute("""UPDATE archive_activity_preview SET
@@ -328,8 +343,11 @@ def scan(limit=1, requests=20, sleeper=time.sleep, wallet_id=None):
             sleeper(0.5)
         if used >= requests:
             break
-    return {'rpc_transfer_requests':used,'wallets_selected':len(wallets),**completed,
-            'note':'preview only; no wallets archived'}
+    result = {'rpc_transfer_requests':used,'wallets_selected':len(wallets),**completed,
+              'note':'preview only; no wallets archived'}
+    if last_error is not None:
+        result['error'] = last_error
+    return result
 
 
 def report():
