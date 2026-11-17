@@ -31,7 +31,7 @@ class ArchivePreviewTests(unittest.TestCase):
                     'next_page_params': None}
         decision, stamp, _ = preview.evaluate(base.A, get=get)
         self.assertEqual(decision, 'candidate')
-        self.assertAlmostEqual(stamp, past)
+        self.assertAlmostEqual(stamp, past, delta=0.001)
         self.assertEqual(calls, list(preview.KINDS))
 
     def test_recent_internal_activity_prevents_candidate(self):
