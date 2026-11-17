@@ -3,9 +3,9 @@ import time
 import unittest
 from unittest.mock import patch
 
+import test_monitor as base
 import app
 import worker
-import test_monitor as base
 
 
 class RpcRetryDiagnosticTests(unittest.TestCase):
