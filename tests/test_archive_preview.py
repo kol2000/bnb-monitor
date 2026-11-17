@@ -142,6 +142,37 @@ class ArchivePreviewTests(unittest.TestCase):
         self.assertEqual(row['decision'],'scanning')
         self.assertEqual(row['cursor_block'],49999)
 
+    def test_explicit_wallet_id_preserves_existing_cursor(self):
+        with app.db() as c:
+            wallet=dict(c.execute('SELECT * FROM wallets').fetchone())
+            preview.start_wallet(c,wallet,tip=200000,stamp=time.time(),cutoff=1)
+            c.execute("""UPDATE archive_activity_preview SET
+                cursor_block=150000, requests=68 WHERE wallet_id=?""",
+                (wallet['id'],))
+        seen=[]
+        def fake_rpc(method,params):
+            seen.append(params[0]['toBlock'])
+            return {'transfers':[]}
+        with patch.object(preview,'safe_tip',return_value=(210000,time.time())),\
+             patch.object(preview,'find_cutoff',return_value=1),\
+             patch.object(preview,'rpc',side_effect=fake_rpc):
+            result=preview.scan(requests=1,wallet_id=wallet['id'],sleeper=lambda _:None)
+        self.assertEqual(result['rpc_transfer_requests'],1)
+        self.assertEqual(seen,[hex(150000)])
+        with app.db() as c:
+            saved=c.execute('SELECT requests,cursor_block FROM archive_activity_preview WHERE wallet_id=?',
+                            (wallet['id'],)).fetchone()
+        self.assertEqual(saved['requests'],69)
+        self.assertEqual(saved['cursor_block'],49999)
+
+    def test_explicit_unknown_wallet_rejected(self):
+        with patch.object(preview,'safe_tip',return_value=(210000,time.time())),\
+             patch.object(preview,'find_cutoff',return_value=1):
+            with self.assertRaisesRegex(ValueError,'Wallet ID not found'):
+                preview.scan(wallet_id=999999)
+        with self.assertRaises(ValueError):
+            preview.scan(wallet_id=0)
+
     def test_wallet_removed_during_scan_cannot_be_recreated(self):
         with app.db() as c:
             original=dict(c.execute('SELECT * FROM wallets').fetchone())
