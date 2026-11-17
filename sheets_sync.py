@@ -163,7 +163,7 @@ def export_request(cfg, token, suffix, payload=None):
         req = Request(url, data=json.dumps(payload).encode() if payload is not None else None,
                       headers={'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'})
         try:
-            with urlopen(req, timeout=20) as response:
+            with urlopen(req, timeout=20 if is_read else 60) as response:
                 raw = response.read(2_000_001)
             if len(raw) > 2_000_000:
                 raise RemoteError('Ответ Google Sheets слишком большой.')
@@ -311,7 +311,7 @@ def export_balances(cycle_started):
         completed = 0
         for start in range(0, len(data), EXPORT_BATCH_SIZE):
             # Abort on a changed address-to-row mapping, including between batches.
-            if export_request(cfg, creds.token, suffix) != snapshot:
+            if start and export_request(cfg, creds.token, suffix) != snapshot:
                 raise RemoteError('Строки Google изменились во время записи. Остальные пакеты не отправлены.')
             current = settings()
             if any(current[k] != cfg[k] for k in ('sheets_enabled', 'sheets_id', 'sheets_tab')):
