@@ -198,7 +198,7 @@ def step(wallet, row):
             if time.time()-row['tip_timestamp'] > MAX_TIP_AGE:
                 decision, detail = 'unknown','Данные устарели за время сканирования; повторите позднее.'
             else:
-                decision, detail = 'candidate','Нет подтверждённых операций за последние 90 дней; возраст адреса неизвестен.'
+                decision, detail = 'candidate','Предварительный кандидат: нет операций в проверенном диапазоне. Последние ~50000 блоков и возраст адреса НЕ проверены.'
             conn.execute("""UPDATE archive_activity_preview SET
                 decision=?,detail=?,checked_at=?,requests=requests+1
                 WHERE wallet_id=?""",
