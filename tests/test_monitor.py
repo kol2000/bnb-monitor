@@ -216,7 +216,7 @@ class MonitorTests(unittest.TestCase):
         cache = worker.FinalizedBlockCache('https://one.example')
         with patch('worker.rpc', side_effect=lambda *args: {
                 'number': hex(next(heights)), 'timestamp': hex(int(time.time()))}), \
-             patch('worker.time.monotonic', side_effect=[1, 1, 1, 7, 7, 7]):
+             patch('worker.time.monotonic', side_effect=[1, 1, 7, 7]):
             self.assertEqual(cache.get(), (256, False))
             self.assertEqual(cache.get(), (257, False))
 
