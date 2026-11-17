@@ -142,6 +142,37 @@ class ArchivePreviewTests(unittest.TestCase):
         self.assertEqual(row['decision'],'scanning')
         self.assertEqual(row['cursor_block'],49999)
 
+    def test_rpc_error_message_is_redacted_but_explanatory(self):
+        secret='super-private-api-key'
+        address='0x'+'a'*40
+        message='Invalid fromBlock for '+address+' token '+secret+' at https://host.example/v1/'+secret
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self,*args): pass
+            def read(self,*args):
+                return json.dumps({'jsonrpc':'2.0','id':1,
+                    'error':{'code':-32602,'message':message}}).encode()
+        with patch.object(preview,'key_from_file',return_value=secret):
+            with self.assertRaises(preview.IndexerError) as thrown:
+                preview.rpc('nr_getAssetTransfers',[{}],opener=lambda *a,**kw:Response())
+        output=str(thrown.exception)
+        self.assertIn('-32602',output)
+        self.assertIn('Invalid fromBlock',output)
+        self.assertNotIn(secret,output)
+        self.assertNotIn(address,output)
+        self.assertNotIn('https://host.example',output)
+
+    def test_scan_failure_exposes_safe_error_and_keeps_cursor(self):
+        with patch.object(preview,'safe_tip',return_value=(100,time.time())),\
+             patch.object(preview,'find_cutoff',return_value=90),\
+             patch.object(preview,'rpc',side_effect=preview.IndexerError(
+                 'NodeReal JSON-RPC code -32602: Invalid params')):
+            report=preview.scan(limit=1,requests=1,sleeper=lambda _:None)
+        self.assertEqual(report['failed'],1)
+        self.assertIn('Invalid params',report['error'])
+        self.assertEqual(preview.report()[0]['decision'],'scanning')
+        self.assertEqual(preview.report()[0]['requests'],0)
+
     def test_explicit_wallet_id_preserves_existing_cursor(self):
         with app.db() as c:
             wallet=dict(c.execute('SELECT * FROM wallets').fetchone())
