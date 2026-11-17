@@ -5,6 +5,7 @@ from decimal import Decimal, InvalidOperation
 import signal
 import threading
 import time
+from urllib.parse import urlsplit
 from app import ASSET_FIELDS, usdt_balance, usdt_decimals, DATA, RemoteError, bnb, db, record_balance, rpc, settings, set_status, telegram
 from sheets_sync import sync_once, export_balances
 from prices import fetch_quote, usd
@@ -161,7 +162,7 @@ def check_once():
         asset_errors = {}
         # Per-cycle counts: asset attempts, successful checks, failures and
         # read timeouts recovered before changing endpoints.
-        rpc_stats = [{'rpc': index + 1, 'host': __import__('urllib.parse', fromlist=['urlsplit']).urlsplit(url).hostname or 'unknown',
+        rpc_stats = [{'rpc': index + 1, 'host': urlsplit(url).hostname or 'unknown',
                       'attempts': 0, 'success': 0, 'errors': 0, 'retry_recovered': 0,
                       'failover_recovered': 0, 'skipped': False}
                      for index, url in enumerate(cfg['rpc_urls'])]
