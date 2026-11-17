@@ -222,10 +222,10 @@ async function refreshArchivePreview(){
  try{
   const d=await api('archive-preview');
   $('archive-summary').textContent='Проверено: '+d.checked+' из '+d.total+
-   ' · кандидатов: '+d.candidates+' · неизвестно: '+d.unknown+
+   ' · предварительных кандидатов: '+d.candidates+' · неизвестно: '+d.unknown+
    ' · режим: без архивирования';
   $('archive-preview-items').innerHTML=d.items.map(r=>{
-   const label=r.decision==='candidate'?'Кандидат (90+ дней)':r.decision==='active'?'Есть активность':'Неизвестно';
+   const label=r.decision==='candidate'?'Предварительный кандидат':r.decision==='active'?'Есть активность':'Неизвестно';
    return '<tr><td>'+escapeHtml(r.name)+'<br><small class="mono">'+escapeHtml(short(r.address))+
     '</small></td><td>'+escapeHtml(r.last_activity?date(r.last_activity):'Нет надёжной даты')+
     '</td><td>'+escapeHtml(label)+'<br><small>'+escapeHtml(r.detail)+'</small></td></tr>';
