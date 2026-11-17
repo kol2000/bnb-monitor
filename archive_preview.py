@@ -1,5 +1,6 @@
 """Conservative, read-only BSC activity preview powered by NodeReal.
 
+Uses count-first RPC for activity detection; does not determine last-transaction date.
 No wallet state changes, balance skips, transactions or Sheet updates.
 Scan small batches manually: python archive_preview.py scan --requests 20
 Review results in the dedicated web tab or run: python archive_preview.py list
@@ -48,13 +49,18 @@ def schema(conn):
         cursor_block INTEGER,
         direction INTEGER NOT NULL DEFAULT 0,
         requests INTEGER NOT NULL DEFAULT 0,
-        window_blocks INTEGER NOT NULL DEFAULT 100000
+        window_blocks INTEGER NOT NULL DEFAULT 100000,
+        scan_method TEXT NOT NULL DEFAULT 'transfers'
     )""")
     # Existing production SQLite tables were created before window_blocks.
     if 'window_blocks' not in {r['name'] for r in conn.execute(
             'PRAGMA table_info(archive_activity_preview)')}:
         conn.execute('ALTER TABLE archive_activity_preview '
                      'ADD COLUMN window_blocks INTEGER NOT NULL DEFAULT 100000')
+    if 'scan_method' not in {r['name'] for r in conn.execute(
+            'PRAGMA table_info(archive_activity_preview)')}:
+        conn.execute("ALTER TABLE archive_activity_preview ADD COLUMN scan_method "
+                     "TEXT NOT NULL DEFAULT 'transfers'")
 
 
 def key_from_file():
@@ -80,7 +86,7 @@ def safe_api_error_message(message, key):
 
 
 def rpc(method, params, *, opener=urlopen):
-    if method not in ('eth_chainId','eth_blockNumber','eth_getBlockByNumber','nr_getAssetTransfers'):
+    if method not in ('eth_chainId','eth_blockNumber','eth_getBlockByNumber','nr_getAssetTransfers','nr_getAssetTransfersCount'):
         raise ValueError('Not a permitted read-only RPC method')
     key = key_from_file()
     request = Request(API_BASE + key,
@@ -201,41 +207,50 @@ def safe_tip():
 def start_wallet(conn, wallet, tip, stamp, cutoff):
     conn.execute("""INSERT INTO archive_activity_preview
         (wallet_id,address,checked_at,decision,detail,cutoff_block,
-         tip_block,tip_timestamp,cursor_block,direction,requests,window_blocks)
-        VALUES(?,?,?,'scanning','Сканирование 90 дней',?,?,?,?,0,0,100000)
+         tip_block,tip_timestamp,cursor_block,direction,requests,window_blocks,scan_method)
+        VALUES(?,?,?,'scanning','Сканирование 90 дней',?,?,?,?,0,0,100000,'count')
         ON CONFLICT(wallet_id) DO UPDATE SET
         address=excluded.address,checked_at=excluded.checked_at,
         last_activity=NULL,decision='scanning',detail='Сканирование 90 дней',
         cutoff_block=excluded.cutoff_block,tip_block=excluded.tip_block,
         tip_timestamp=excluded.tip_timestamp,cursor_block=excluded.cursor_block,
-        direction=0,requests=0,window_blocks=100000""",
+        direction=0,requests=0,window_blocks=100000,scan_method='count'""",
         (wallet['id'],wallet['address'],time.time(),cutoff,tip,stamp,tip))
 
 
+def count_result(value):
+    """NodeReal returns a hexadecimal transfer count."""
+    if not isinstance(value, str) or not HEX.fullmatch(value):
+        raise IndexerError('NodeReal invalid transfer count')
+    return int(value, 16)
+
+
 def step(wallet, row):
-    """One transfer API call, followed by a checkpoint in SQLite."""
+    """Count-only activity preview with exact persisted range boundaries.
+
+    A positive count proves an operation occurred in the checked block window.
+    It does not establish the exact timestamp of the last transaction.
+    """
     direction = DIRECTIONS[row['direction']]
     high = row['cursor_block']
     requested_window = row['window_blocks'] if 'window_blocks' in row.keys() else WINDOW
     if requested_window not in FALLBACK_WINDOWS:
         raise IndexerError('Invalid saved archive scan window')
     position = FALLBACK_WINDOWS.index(requested_window)
-    # On a persistent timeout, retry the SAME high block with a smaller
-    # contiguous window. Never advance cursor until an entire window succeeds.
     for index in range(position, len(FALLBACK_WINDOWS)):
         current_window = FALLBACK_WINDOWS[index]
         low = max(row['cutoff_block'], high-current_window)
         params = {'category': KINDS, direction: wallet['address'],
-                  'fromBlock':hex(low),'toBlock':hex(high),
-                  'order':'desc','maxCount':'0x1','excludeZeroValue':False}
+                  'fromBlock':hex(low),'toBlock':hex(high)}
         try:
-            result = rpc('nr_getAssetTransfers',[params])
+            result = rpc('nr_getAssetTransfersCount',[params])
+            count = count_result(result)
             break
         except IndexerError as exc:
             if 'timed out on both read attempts' not in str(exc):
                 raise
             if index == len(FALLBACK_WINDOWS)-1:
-                raise IndexerError('NodeReal timed out even on 5000 blocks') from None
+                raise IndexerError('NodeReal count API timed out even on 5000 blocks') from None
             next_window = FALLBACK_WINDOWS[index+1]
             with db() as conn:
                 live = conn.execute('SELECT address FROM wallets WHERE id=?',
@@ -244,20 +259,22 @@ def step(wallet, row):
                     raise IndexerError('Wallet removed during scan')
                 conn.execute('UPDATE archive_activity_preview SET window_blocks=?, '
                              'detail=? WHERE wallet_id=?',
-                             (next_window,
-                              'NodeReal timeout: reduced range to '+str(next_window),
+                             (next_window,'NodeReal count timeout: reduced range to '+str(next_window),
                               wallet['id']))
-    activity = transfer_result(result,wallet['address'],direction,low,high)
     with db() as conn:
         live = conn.execute('SELECT address FROM wallets WHERE id=?',
                             (wallet['id'],)).fetchone()
         if not live or live['address'] != wallet['address']:
             return 'removed'
-        if activity is not None:
+        if count > 0:
             conn.execute("""UPDATE archive_activity_preview SET
-                decision='active',last_activity=?,detail='Операция за последние 90 дней',
-                checked_at=?,requests=requests+1 WHERE wallet_id=?""",
-                (activity,time.time(),wallet['id']))
+                decision='active',last_activity=NULL,
+                detail=?,checked_at=?,requests=requests+1
+                WHERE wallet_id=?""",
+                ('Подтверждена активность: '+str(count)+
+                 ' операций в диапазоне блоков '+str(low)+'–'+str(high)+
+                 '; точная дата последней операции неизвестна',
+                 time.time(),wallet['id']))
             return 'active'
         next_cursor = low-1
         next_direction = row['direction']
@@ -339,6 +356,12 @@ def scan(limit=1, requests=20, sleeper=time.sleep, wallet_id=None):
             schema(conn)
             row = conn.execute('SELECT * FROM archive_activity_preview WHERE wallet_id=?',
                                (wallet['id'],)).fetchone()
+            if row is not None and row['scan_method'] != 'count':
+                # Transfer-list absence was not independently validated. Recheck
+                # from tip using the count API before making any candidate claim.
+                start_wallet(conn,wallet,tip,tip_stamp,cutoff)
+                row = conn.execute('SELECT * FROM archive_activity_preview WHERE wallet_id=?',
+                                   (wallet['id'],)).fetchone()
             resume_old_failure = (row is not None and row['address'] == wallet['address']
                 and row['decision'] == 'unknown'
                 and row['detail'] == 'Ошибка NodeReal; сканирование не подтверждено'
