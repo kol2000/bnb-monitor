@@ -235,10 +235,12 @@ def step(wallet, row):
     return 'scanning'
 
 
-def scan(limit=1, requests=20, sleeper=time.sleep):
+def scan(limit=1, requests=20, sleeper=time.sleep, wallet_id=None):
     """Bounded manual execution; unfinished wallets resume at their checkpoint."""
     if not 1 <= limit <= 10 or not 1 <= requests <= 100:
         raise ValueError('Use --limit 1..10 and --requests 1..100')
+    if wallet_id is not None and (not isinstance(wallet_id, int) or wallet_id < 1):
+        raise ValueError('Use --wallet-id with a positive integer')
     tip, tip_stamp = safe_tip()
     now = time.time()
     cutoff = find_cutoff(tip,now)
@@ -246,19 +248,45 @@ def scan(limit=1, requests=20, sleeper=time.sleep):
     completed = {'active':0,'candidate':0,'unknown':0,'failed':0}
     with db() as conn:
         schema(conn)
-        wallets = [dict(r) for r in conn.execute("""
-            SELECT w.id,w.address,p.decision,p.checked_at,p.address AS scanned_address
-            FROM wallets w LEFT JOIN archive_activity_preview p ON w.id=p.wallet_id
-            WHERE p.wallet_id IS NULL OR p.decision='scanning'
-               OR (p.decision='unknown' AND p.detail='Ошибка NodeReal; сканирование не подтверждено'
-                   AND p.cursor_block IS NOT NULL AND p.cutoff_block IS NOT NULL
-                   AND p.tip_block IS NOT NULL AND p.direction IN (0,1))
-               OR p.address!=w.address
-               OR (p.decision IN ('active','candidate','unknown')
-                   AND p.checked_at<?)
-            ORDER BY CASE WHEN p.decision='scanning' THEN 0 ELSE 1 END,
-                     COALESCE(p.checked_at,0),w.id LIMIT ?""",
-            (now-86400,limit))]
+        # An explicit wallet ID bypasses the automatic queue. Existing partial
+        # progress is still resumed; a completed wallet starts a fresh preview.
+        if wallet_id is not None:
+            wallets = [dict(r) for r in conn.execute("""
+                SELECT w.id,w.address,p.decision,p.checked_at,
+                       p.address AS scanned_address
+                FROM wallets w LEFT JOIN archive_activity_preview p
+                    ON w.id=p.wallet_id
+                WHERE w.id=?""", (wallet_id,))]
+            if not wallets:
+                raise ValueError('Wallet ID not found')
+        else:
+            wallets = [dict(r) for r in conn.execute("""
+                SELECT w.id,w.address,p.decision,p.checked_at,
+                       p.address AS scanned_address
+                FROM wallets w LEFT JOIN archive_activity_preview p
+                    ON w.id=p.wallet_id
+                WHERE p.wallet_id IS NULL OR p.decision='scanning'
+                   OR (p.decision='unknown'
+                       AND p.detail='Ошибка NodeReal; сканирование не подтверждено'
+                       AND p.cursor_block IS NOT NULL
+                       AND p.cutoff_block IS NOT NULL
+                       AND p.tip_block IS NOT NULL
+                       AND p.direction IN (0,1))
+                   OR p.address!=w.address
+                   OR (p.decision IN ('active','candidate','unknown')
+                       AND p.checked_at<?)
+                ORDER BY
+                    CASE WHEN p.decision='scanning' OR
+                        (p.decision='unknown' AND
+                         p.detail='Ошибка NodeReal; сканирование не подтверждено')
+                        THEN 0 ELSE 1 END,
+                    CASE WHEN p.decision='scanning' OR
+                        (p.decision='unknown' AND
+                         p.detail='Ошибка NodeReal; сканирование не подтверждено')
+                        THEN COALESCE(p.requests,0) ELSE 0 END DESC,
+                    COALESCE(p.checked_at,0),w.id
+                LIMIT ?""", (now-86400,limit))]
+
     for wallet in wallets:
         with db() as conn:
             schema(conn)
@@ -323,9 +351,11 @@ def main():
     parser.add_argument('action',choices=('scan','list'))
     parser.add_argument('--limit',type=int,default=1)
     parser.add_argument('--requests',type=int,default=20)
+    parser.add_argument('--wallet-id',type=int,default=None,
+                        help='Select a specific existing wallet (does not archive it)')
     args=parser.parse_args()
     if args.action == 'scan':
-        print(json.dumps(scan(args.limit,args.requests),ensure_ascii=False))
+        print(json.dumps(scan(args.limit,args.requests,wallet_id=args.wallet_id),ensure_ascii=False))
     else:
         for row in report():
             when = (datetime.fromtimestamp(row['last_activity'],timezone.utc).isoformat()
