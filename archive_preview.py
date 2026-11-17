@@ -247,7 +247,7 @@ def step(wallet, row):
                              (next_window,
                               'NodeReal timeout: reduced range to '+str(next_window),
                               wallet['id']))
-        activity = transfer_result(result,wallet['address'],direction,low,high)
+    activity = transfer_result(result,wallet['address'],direction,low,high)
     with db() as conn:
         live = conn.execute('SELECT address FROM wallets WHERE id=?',
                             (wallet['id'],)).fetchone()
