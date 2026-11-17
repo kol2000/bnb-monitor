@@ -189,6 +189,9 @@ async function refresh(){
  $('monitor-status').className='status-title '+(stale||s.error?'negative':'positive');
  $('last-check').textContent=s.last_cycle?'Цикл: '+date(s.last_cycle):'Ожидание первого цикла';
  $('rpc-error').hidden=!(stale||s.error);$('rpc-error').textContent=stale?'Фоновый процесс не отвечает. Проверьте: sudo docker compose ps и sudo docker compose logs worker':s.error;
+ const rpcStats=Array.isArray(s.rpc_cycle_stats)?s.rpc_cycle_stats:[];
+ $('rpc-cycle-details').hidden=!rpcStats.length;
+ $('rpc-cycle-details').textContent=rpcStats.length?'RPC · '+rpcStats.map(r=>`#${r.rpc} ${r.host}: успешно ${r.success}/${r.attempts}, ошибок ${r.errors}, повторных чтений восстановлено ${r.retry_recovered}, резервом восстановлено ${r.failover_recovered}${r.skipped?' (пропущен: cooldown)':''}`).join(' · ')+(s.running?' · текущий цикл':' · последний цикл'):'';
  if(d.health){
   $('checked-count').textContent=`Свежих: ${d.health.fresh} · устаревших: ${d.health.stale} · ошибок: ${d.health.errors}`;
   $('total-usd').textContent+=(d.health.stale||d.health.errors)?' · часть данных устарела':'';
