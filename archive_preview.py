@@ -9,6 +9,7 @@ import argparse
 import json
 import os
 import re
+import socket
 import time
 from datetime import datetime, timezone
 from urllib.error import HTTPError, URLError
@@ -69,20 +70,43 @@ def rpc(method, params, *, opener=urlopen):
                                        'params':params}).encode(),
                       headers={'Content-Type':'application/json','Accept':'application/json',
                                'User-Agent':'BNB-Monitor/1.0'})
-    try:
-        with opener(request, timeout=20) as res:
-            data = res.read(600001)
-        if len(data) > 600000:
-            raise ValueError('oversized payload')
-        value = json.loads(data)
-        if not isinstance(value, dict) or 'result' not in value or value.get('error'):
-            raise ValueError('API error')
-        return value['result']
-    except (HTTPError, URLError, TimeoutError, OSError, ValueError,
-            UnicodeError, TypeError) as exc:
-        # Never expose secret URL from urllib exceptions or raw responses.
-        raise IndexerError('NodeReal request failed ('+type(exc).__name__+
-                           '); check API quota / connection / indexer lag') from None
+    # The only retry is a safe JSON-RPC READ. A timeout never retries transfers
+    # or other write operations. Keep exception URLs/API-key bytes out of logs.
+    for attempt in range(2):
+        try:
+            with opener(request, timeout=20) as res:
+                data = res.read(600001)
+            if len(data) > 600000:
+                raise IndexerError('NodeReal oversized response')
+            value = json.loads(data)
+            if not isinstance(value, dict):
+                raise IndexerError('NodeReal invalid JSON-RPC envelope')
+            if value.get('error'):
+                error = value['error']
+                # Do not echo remote error message: it could contain the URL/key.
+                code = error.get('code') if isinstance(error, dict) else None
+                raise IndexerError('NodeReal JSON-RPC rejected request (code: ' +
+                                   str(code if isinstance(code, int) else 'unknown') + ')')
+            if 'result' not in value:
+                raise IndexerError('NodeReal response has no result')
+            return value['result']
+        except HTTPError as exc:
+            # Rate limits/permission problems should be visible, not blindly retried.
+            raise IndexerError('NodeReal HTTP ' + str(exc.code)) from None
+        except (TimeoutError, socket.timeout) as exc:
+            if attempt == 0:
+                time.sleep(2)
+                continue
+            raise IndexerError('NodeReal timed out on both read attempts') from None
+        except URLError as exc:
+            if isinstance(exc.reason, (TimeoutError, socket.timeout)) and attempt == 0:
+                time.sleep(2)
+                continue
+            reason = ('timeout' if isinstance(exc.reason,(TimeoutError,socket.timeout))
+                      else type(exc.reason).__name__)
+            raise IndexerError('NodeReal connection error (' + reason + ')') from None
+        except (OSError, ValueError, UnicodeError, TypeError):
+            raise IndexerError('NodeReal invalid or incomplete response') from None
 
 
 def block_data(number):
@@ -226,6 +250,9 @@ def scan(limit=1, requests=20, sleeper=time.sleep):
             SELECT w.id,w.address,p.decision,p.checked_at,p.address AS scanned_address
             FROM wallets w LEFT JOIN archive_activity_preview p ON w.id=p.wallet_id
             WHERE p.wallet_id IS NULL OR p.decision='scanning'
+               OR (p.decision='unknown' AND p.detail='Ошибка NodeReal; сканирование не подтверждено'
+                   AND p.cursor_block IS NOT NULL AND p.cutoff_block IS NOT NULL
+                   AND p.tip_block IS NOT NULL AND p.direction IN (0,1))
                OR p.address!=w.address
                OR (p.decision IN ('active','candidate','unknown')
                    AND p.checked_at<?)
@@ -237,7 +264,15 @@ def scan(limit=1, requests=20, sleeper=time.sleep):
             schema(conn)
             row = conn.execute('SELECT * FROM archive_activity_preview WHERE wallet_id=?',
                                (wallet['id'],)).fetchone()
-            if row is None or row['address'] != wallet['address'] or row['decision']!='scanning':
+            resume_old_failure = (row is not None and row['address'] == wallet['address']
+                and row['decision'] == 'unknown'
+                and row['detail'] == 'Ошибка NodeReal; сканирование не подтверждено'
+                and row['cursor_block'] is not None and row['cutoff_block'] is not None
+                and row['tip_block'] is not None and row['direction'] in (0,1))
+            if resume_old_failure:
+                conn.execute('UPDATE archive_activity_preview SET decision=?,detail=? WHERE wallet_id=?',
+                             ('scanning','Повторная попытка после ошибки NodeReal',wallet['id']))
+            elif row is None or row['address'] != wallet['address'] or row['decision']!='scanning':
                 start_wallet(conn,wallet,tip,tip_stamp,cutoff)
                 row = conn.execute('SELECT * FROM archive_activity_preview WHERE wallet_id=?',
                                    (wallet['id'],)).fetchone()
@@ -249,7 +284,7 @@ def scan(limit=1, requests=20, sleeper=time.sleep):
                 # Keep the cursor unchanged. No false candidate on an API error.
                 with db() as conn:
                     conn.execute("""UPDATE archive_activity_preview SET
-                        decision='unknown',detail='Ошибка NodeReal; сканирование не подтверждено',
+                        decision='scanning',detail='Пауза: ошибка NodeReal, можно продолжить с сохранённого блока',
                         checked_at=? WHERE wallet_id=?""",(time.time(),wallet['id']))
                 completed['failed']+=1
                 completed['unknown']+=1
