@@ -64,11 +64,11 @@ def key_from_file():
 def safe_api_error_message(message, key):
     """Redact credentials, URLs and addresses from a short remote diagnostic."""
     value = str(message).replace(key, '[API_KEY]')
-    value = re.sub(r'https?://[^\\s\\x00-\\x20]+', '[URL]', value, flags=re.I)
+    value = re.sub(r'https?://[^\s\x00-\x20]+', '[URL]', value, flags=re.I)
     value = re.sub(r'0x[0-9a-fA-F]{40,}', '[ADDRESS_OR_HEX]', value)
-    value = re.sub(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}', '[EMAIL]', value)
+    value = re.sub(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}', '[EMAIL]', value)
     value = re.sub(r'(?<![A-Za-z0-9_])[A-Za-z0-9_-]{24,}(?![A-Za-z0-9_])', '[TOKEN]', value)
-    value = re.sub(r'[\\x00-\\x1f\\x7f]', ' ', value)
+    value = re.sub(r'[\x00-\x1f\x7f]', ' ', value)
     return value[:180]
 
 
