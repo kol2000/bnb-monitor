@@ -226,6 +226,11 @@ def check_once():
                             failures = min(health.get('failures', 0) + 1, 5)
                             rpc_health[key] = {'failures': failures, 'until': time.time()+min(300, 15*2**failures)}
                             break
+                    # Persist a live snapshot without writing SQLite after every
+                    # asset read. Failed attempts count too; the final snapshot is
+                    # still saved at provider exit and at the end of the cycle.
+                    if provider_stats['attempts'] % 10 == 0:
+                        set_status(rpc_cycle_stats=rpc_stats)
                     # Keep backoff on consecutive RPC failures; successful requests
                     # use a configurable delay to balance speed and public-RPC quotas.
                     delay = cfg['rpc_success_delay'] if consecutive == 0 else min(8.0, 2.0 ** consecutive)
