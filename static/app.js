@@ -180,7 +180,7 @@ async function refresh(){
  $('google-key-status').textContent=g.google_key_set?'Ключ Google установлен на сервере.':'Ключ не установлен. Выполните configure_google.py на VM (инструкция в README).';
  $('google-status').textContent=s.sheets_error?'Ошибка: '+s.sheets_error:s.sheets_success?'Последняя синхронизация: '+date(s.sheets_success)+' · адресов: '+s.sheets_counts.valid+' · добавлено: '+s.sheets_counts.added+' · переименовано: '+s.sheets_counts.renamed+' · неверных строк: '+s.sheets_counts.invalid:'Синхронизации ещё не было.';
 
- $('google-export-status').textContent=s.sheets_export_error?'Запись балансов: '+s.sheets_export_error:s.sheets_export_success?'Балансы записаны: '+date(s.sheets_export_success)+' · ячеек: '+s.sheets_export_count:'Запись балансов ещё не выполнялась.';
+ $('google-export-status').textContent=(s.sheets_export_error?'Ошибка записи: '+s.sheets_export_error:'')+(s.sheets_export_attempt?' · последняя попытка: '+date(s.sheets_export_attempt):'')+(s.sheets_export_last_count?' · подтверждено в попытке: '+s.sheets_export_last_count+' ячеек':'')+(s.sheets_export_success?' · последний успех: '+date(s.sheets_export_success)+' · ячеек: '+s.sheets_export_count:'')||'Запись балансов ещё не выполнялась.';
  $('google-export-status').className='small '+(s.sheets_export_error?'negative':'muted');
  $('google-status').className='small '+(s.sheets_error?'negative':'muted');
  if(!loadedGoogle){$('sheets-enabled').checked=g.sheets_enabled;$('sheets-id').value=g.sheets_id;$('sheets-tab').value=g.sheets_tab;$('sheets-interval').value=g.sheets_interval;loadedGoogle=true;}
