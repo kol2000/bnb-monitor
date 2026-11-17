@@ -85,7 +85,62 @@ class ArchivePreviewTests(unittest.TestCase):
              patch.object(preview,'rpc',side_effect=preview.IndexerError('blocked')):
             r=preview.scan(limit=1,requests=1,sleeper=lambda _:None)
         self.assertEqual(r['failed'],1)
-        self.assertEqual(preview.report()[0]['decision'],'unknown')
+        self.assertEqual(preview.report()[0]['decision'],'scanning')
+
+    def test_timeout_retried_once_without_exposing_key(self):
+        with patch.object(preview,'key_from_file',return_value='private-secret'):
+            calls=[]
+            class Response:
+                def __enter__(self): return self
+                def __exit__(self,*_): pass
+                def read(self, _): return b'{"jsonrpc":"2.0","id":1,"result":"0x38"}'
+            def network(req,timeout):
+                calls.append(timeout)
+                if len(calls)==1: raise TimeoutError('private-secret')
+                return Response()
+            with patch.object(preview.time,'sleep') as delay:
+                result=preview.rpc('eth_chainId',[],opener=network)
+            self.assertEqual(result,'0x38')
+            self.assertEqual(calls,[20,20])
+            delay.assert_called_once_with(2)
+
+    def test_http_rate_limit_not_retried_and_key_not_disclosed(self):
+        from urllib.error import HTTPError
+        with patch.object(preview,'key_from_file',return_value='private-secret'):
+            calls=[]
+            def network(req,timeout):
+                calls.append(1)
+                raise HTTPError(req.full_url,429,'private-secret',None,None)
+            with self.assertRaises(preview.IndexerError) as err:
+                preview.rpc('eth_chainId',[],opener=network)
+            self.assertEqual(len(calls),1)
+            self.assertIn('HTTP 429',str(err.exception))
+            self.assertNotIn('private-secret',str(err.exception))
+
+    def test_resume_previous_unknown_failure_without_restart(self):
+        with app.db() as c:
+            wallet=dict(c.execute('SELECT * FROM wallets').fetchone())
+            preview.start_wallet(c,wallet,tip=200000,stamp=time.time(),cutoff=1)
+            c.execute("""UPDATE archive_activity_preview SET decision='unknown',
+                detail='Ошибка NodeReal; сканирование не подтверждено',
+                cursor_block=150000,direction=0,requests=68 WHERE wallet_id=?""",
+                (wallet['id'],))
+        bounds=[]
+        def fake_rpc(method,params):
+            if method=='nr_getAssetTransfers':
+                bounds.append(params[0]['toBlock'])
+                return {'transfers':[]}
+            raise AssertionError(method)
+        with patch.object(preview,'safe_tip',return_value=(210000,time.time())),\
+             patch.object(preview,'find_cutoff',return_value=1),\
+             patch.object(preview,'rpc',side_effect=fake_rpc):
+            result=preview.scan(limit=1,requests=1,sleeper=lambda _:None)
+        self.assertEqual(result['rpc_transfer_requests'],1)
+        self.assertEqual(bounds,[hex(150000)])
+        row=preview.report()[0]
+        self.assertEqual(row['requests'],69)
+        self.assertEqual(row['decision'],'scanning')
+        self.assertEqual(row['cursor_block'],49999)
 
     def test_wallet_removed_during_scan_cannot_be_recreated(self):
         with app.db() as c:
