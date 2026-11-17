@@ -149,6 +149,32 @@ class ArchivePreviewTests(unittest.TestCase):
         self.assertEqual(saved['window_blocks'],100000)
         self.assertEqual(saved['requests'],0)
 
+    def test_legacy_transfer_scan_restarts_from_tip_for_count_verification(self):
+        with app.db() as c:
+            wallet=dict(c.execute('SELECT * FROM wallets').fetchone())
+            preview.start_wallet(c,wallet,tip=200000,stamp=time.time(),cutoff=1)
+            c.execute("""UPDATE archive_activity_preview SET
+                scan_method='transfers', cursor_block=127285, requests=68,
+                window_blocks=5000 WHERE wallet_id=?""",(wallet['id'],))
+        observed=[]
+        def fake_count(method,params):
+            observed.append((method,int(params[0]['toBlock'],16)))
+            return '0x0'
+        with patch.object(preview,'safe_tip',return_value=(210000,time.time())),\
+             patch.object(preview,'find_cutoff',return_value=1),\
+             patch.object(preview,'rpc',side_effect=fake_count):
+            result=preview.scan(wallet_id=wallet['id'],requests=1,sleeper=lambda _:None)
+        self.assertEqual(result['rpc_transfer_requests'],1)
+        self.assertEqual(observed,[('nr_getAssetTransfersCount',210000)])
+        with app.db() as c:
+            row=c.execute('SELECT scan_method,requests,window_blocks,cursor_block '
+                          'FROM archive_activity_preview WHERE wallet_id=?',
+                          (wallet['id'],)).fetchone()
+        self.assertEqual(row['scan_method'],'count')
+        self.assertEqual(row['requests'],1)
+        self.assertEqual(row['window_blocks'],100000)
+        self.assertEqual(row['cursor_block'],109999)
+
     def test_count_rpc_validates_hex_and_uses_exact_address_filters(self):
         for bad in (None, True, -1, 0, '1', '0x', '0xzz', {}, []):
             with self.assertRaises(preview.IndexerError):
