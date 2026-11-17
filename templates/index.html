@@ -30,7 +30,7 @@
     <div id="rpc-cycle-details" class="notice small" hidden></div>
     <p class="notice">ⓘ Отслеживаем <strong>изменение баланса</strong>, не каждую транзакцию. Поступление и списание между проверками могут взаимно скрыться. Первый баланс — точка отсчёта, без уведомления.</p>
     <div id="ip-warning" class="warning ip-warning" hidden><span id="ip-warning-text"></span><button id="ip-warning-dismiss" type="button" class="ip-warning-dismiss" aria-label="Закрыть предупреждение об изменении IP" title="Скрыть это предупреждение">×</button></div>
-    <nav class="tabs"><button class="tab active" data-tab="wallets">Кошельки</button><button class="tab" data-tab="binance">Биржа Binance</button><button class="tab" data-tab="gate">Биржа Gate</button><button class="tab" data-tab="bybit">Биржа Bybit</button><button class="tab" data-tab="swaps">Обмен BNB / USDT</button><button class="tab" data-tab="generator">Генератор кошельков</button><button class="tab" data-tab="history">История изменений</button><button class="tab" data-tab="withdrawals">Журнал операций</button><button class="tab" data-tab="settings">Настройки</button></nav>
+    <nav class="tabs"><button class="tab active" data-tab="wallets">Кошельки</button><button class="tab" data-tab="binance">Биржа Binance</button><button class="tab" data-tab="gate">Биржа Gate</button><button class="tab" data-tab="bybit">Биржа Bybit</button><button class="tab" data-tab="swaps">Обмен BNB / USDT</button><button class="tab" data-tab="generator">Генератор кошельков</button><button class="tab" data-tab="history">История изменений</button><button class="tab" data-tab="archive">Архив · проверка</button><button class="tab" data-tab="withdrawals">Журнал операций</button><button class="tab" data-tab="settings">Настройки</button></nav>
     <section id="tab-wallets">
       <div class="card add-card"><div><h2>Добавить кошельки</h2><p class="muted small">Один адрес на строку. Можно добавить название через пробел.</p></div><form id="wallet-form"><textarea id="addresses" rows="3" placeholder="0x… Основной кошелёк&#10;0x… Резервный" required spellcheck="false"></textarea><button type="submit">+ Добавить адреса</button></form></div>
       <div class="settings-grid"><label>Поиск по имени или адресу<input id="wallet-search" type="search" placeholder="Email или 0x…"></label><label>Показать<select id="wallet-filter"><option value="all">Все кошельки</option><option value="bnb">С балансом BNB</option><option value="usdt">С балансом USDT</option><option value="unnamed">Без имени</option><option value="error">С ошибками проверки</option><option value="stale">Устаревшие балансы</option><option value="account2">Аккаунт 2 (проверенные)</option></select></label></div>
@@ -71,6 +71,16 @@
     </section>
     <section id="tab-history" hidden><div class="section-heading"><h2>Последние 200 изменений</h2><p class="muted small">Время отображается в часовом поясе вашего браузера.</p></div><div class="table-wrap card"><table><thead><tr><th>Время / кошелёк</th><th>Изменение / актив</th><th>Новый баланс</th><th>Блок</th><th>Уведомление</th></tr></thead><tbody id="event-list"></tbody></table><div id="event-empty" class="empty">Изменений пока нет. Начальный баланс в историю не записывается.</div></div></section>
 
+    <section id="tab-archive" hidden>
+      <div class="card">
+        <h2>Предварительные кандидаты · безопасный просмотр</h2>
+        <p class="muted small">Реальная история BSC: обычные транзакции, внутренние операции и переводы токенов. Просматриваем последние 90 дней, кроме недавних блоков, ещё не проиндексированных NodeReal. Кандидаты предварительные: свежие операции и возраст адреса могут быть неизвестны. Никакие адреса не архивируются, не удаляются из Google Sheets и не исключаются из мониторинга.</p>
+        <p id="archive-summary" aria-live="polite">Проверки пока нет.</p>
+        <button type="button" id="archive-refresh" class="secondary">Обновить список</button>
+        <div class="table-wrap"><table><thead><tr><th>Кошелёк</th><th>Последняя операция</th><th>Результат</th></tr></thead><tbody id="archive-preview-items"></tbody></table></div>
+        <p class="muted small">Проверка запускается вручную на сервере: <code>sudo docker compose exec -T web python archive_preview.py scan --limit 1 --requests 20</code>. Сначала тестируем малую партию. «Неизвестно» не считается неактивностью. Отчёт не предназначен для автоматического отключения проверок.</p>
+      </div>
+    </section>
     <section id="tab-binance" hidden>
       <p class="muted small">Спотовый аккаунт и журнал Binance. Вывод BNB поддерживается в сети BSC. Ключи устанавливаются командой python3 configure_binance.py на VM.</p>
       <div class="card"><div class="section-heading"><h2>Спотовый аккаунт Binance</h2><button id="binance-refresh" class="secondary" type="button">Проверить баланс и выводы</button></div><p id="binance-balances">Нажмите «Проверить баланс и выводы», чтобы загрузить данные биржи и сети.</p><small id="binance-updated">Ключи хранятся только на сервере.</small></div>
