@@ -38,7 +38,7 @@ class ArchivePreviewTests(unittest.TestCase):
             before=dict(c.execute('SELECT * FROM wallets').fetchone())
             preview.start_wallet(c,before,tip=100,stamp=time.time(),cutoff=90)
             row=dict(c.execute('SELECT * FROM archive_activity_preview').fetchone())
-        with patch.object(preview,'rpc',return_value={'transfers':[]}) as send:
+        with patch.object(preview,'rpc',return_value='0x0') as send:
             result=preview.step(before,row)
             self.assertEqual(result,'scanning')
             with app.db() as c:
@@ -57,17 +57,17 @@ class ArchivePreviewTests(unittest.TestCase):
             before=dict(c.execute('SELECT * FROM wallets').fetchone())
             preview.start_wallet(c,before,tip=100,stamp=time.time(),cutoff=90)
             row=dict(c.execute('SELECT * FROM archive_activity_preview').fetchone())
-        data={'transfers':[{'blockNum':'0x61','category':'external',
-                            'from':base.A,'blockTimeStamp':int(time.time())}]}
+        data='0x1'
         with patch.object(preview,'rpc',return_value=data):
             result=preview.step(before,row)
         self.assertEqual(result,'active')
         self.assertEqual(preview.report()[0]['decision'],'active')
+        self.assertIsNone(preview.report()[0]['last_activity'])
 
     def test_scan_limit_and_persisted_progress(self):
         with patch.object(preview,'safe_tip',return_value=(210000,time.time())),\
              patch.object(preview,'find_cutoff',return_value=1),\
-             patch.object(preview,'rpc',return_value={'transfers':[]}):
+             patch.object(preview,'rpc',return_value='0x0'):
             r=preview.scan(limit=1,requests=1,sleeper=lambda _:None)
             self.assertEqual(r['rpc_transfer_requests'],1)
             x=preview.report()[0]
@@ -119,7 +119,7 @@ class ArchivePreviewTests(unittest.TestCase):
             sizes.append(high-low)
             if len(sizes)<3:
                 raise preview.IndexerError('NodeReal timed out on both read attempts')
-            return {'transfers':[]}
+            return '0x0'
         with patch.object(preview,'rpc',side_effect=fake_rpc):
             self.assertEqual(preview.step(wallet,row),'scanning')
         self.assertEqual(sizes,[100000,25000,5000])
@@ -148,6 +148,33 @@ class ArchivePreviewTests(unittest.TestCase):
         self.assertEqual(saved['cursor_block'],200000)
         self.assertEqual(saved['window_blocks'],100000)
         self.assertEqual(saved['requests'],0)
+
+    def test_count_rpc_validates_hex_and_uses_exact_address_filters(self):
+        for bad in (None, True, -1, 0, '1', '0x', '0xzz', {}, []):
+            with self.assertRaises(preview.IndexerError):
+                preview.count_result(bad)
+        self.assertEqual(preview.count_result('0x0'),0)
+        self.assertEqual(preview.count_result('0x2'),2)
+        with app.db() as c:
+            wallet=dict(c.execute('SELECT * FROM wallets').fetchone())
+            preview.start_wallet(c,wallet,tip=200000,stamp=time.time(),cutoff=1)
+            row=dict(c.execute('SELECT * FROM archive_activity_preview').fetchone())
+            c.execute('UPDATE archive_activity_preview SET window_blocks=5000 WHERE wallet_id=?',
+                      (wallet['id'],))
+            row=dict(c.execute('SELECT * FROM archive_activity_preview').fetchone())
+        seen=[]
+        def mock_count(method,params):
+            seen.append((method,params[0]))
+            return '0x1'
+        with patch.object(preview,'rpc',side_effect=mock_count):
+            self.assertEqual(preview.step(wallet,row),'active')
+        self.assertEqual(len(seen),1)
+        self.assertEqual(seen[0][0],'nr_getAssetTransfersCount')
+        self.assertEqual(seen[0][1]['fromAddress'],wallet['address'])
+        self.assertEqual(int(seen[0][1]['toBlock'],16),200000)
+        self.assertEqual(int(seen[0][1]['fromBlock'],16),195000)
+        self.assertNotIn('maxCount',seen[0][1])
+        self.assertIn('Подтверждена активность',preview.report()[0]['detail'])
 
     def test_timeout_retried_once_without_exposing_key(self):
         with patch.object(preview,'key_from_file',return_value='private-secret'):
@@ -189,9 +216,9 @@ class ArchivePreviewTests(unittest.TestCase):
                 (wallet['id'],))
         bounds=[]
         def fake_rpc(method,params):
-            if method=='nr_getAssetTransfers':
+            if method=='nr_getAssetTransfersCount':
                 bounds.append(params[0]['toBlock'])
-                return {'transfers':[]}
+                return '0x0'
             raise AssertionError(method)
         with patch.object(preview,'safe_tip',return_value=(210000,time.time())),\
              patch.object(preview,'find_cutoff',return_value=1),\
@@ -245,7 +272,7 @@ class ArchivePreviewTests(unittest.TestCase):
         seen=[]
         def fake_rpc(method,params):
             seen.append(params[0]['toBlock'])
-            return {'transfers':[]}
+            return '0x0'
         with patch.object(preview,'safe_tip',return_value=(210000,time.time())),\
              patch.object(preview,'find_cutoff',return_value=1),\
              patch.object(preview,'rpc',side_effect=fake_rpc):
@@ -272,7 +299,7 @@ class ArchivePreviewTests(unittest.TestCase):
             preview.start_wallet(c,original,tip=100,stamp=time.time(),cutoff=90)
             row=dict(c.execute('SELECT * FROM archive_activity_preview').fetchone())
             c.execute('DELETE FROM wallets WHERE id=?',(original['id'],))
-        with patch.object(preview,'rpc',return_value={'transfers':[]}):
+        with patch.object(preview,'rpc',return_value='0x0'):
             self.assertEqual(preview.step(original,row),'removed')
         self.assertEqual(preview.report(),[])
 
