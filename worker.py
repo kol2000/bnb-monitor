@@ -41,6 +41,30 @@ def refresh_price():
         # Preserve the previous quote and its original timestamp on any failure.
         set_status(price_error='Не удалось обновить курс CoinMarketCap.')
 
+def retry_rpc_read(url, method, params, on_recovered=None):
+    """One bounded retry for a transient RPC timeout; read-only methods only.
+
+    Never retry writes, transaction submissions, or arbitrary RPC methods.
+    """
+    if method not in ('eth_chainId', 'eth_getBlockByNumber',
+                      'eth_getBalance', 'eth_call'):
+        return rpc(url, method, params)
+    try:
+        return rpc(url, method, params)
+    except RemoteError as exc:
+        if 'Тайм-аут подключения к сервису' not in str(exc):
+            raise
+        if stop.is_set():
+            raise
+        stop.wait(0.25)
+        if stop.is_set():
+            raise
+        result = rpc(url, method, params)
+        if on_recovered is not None:
+            on_recovered()
+        return result
+
+
 FINALIZED_CACHE_SECONDS = 5.0
 FINALIZED_CACHE_MAX_USES = 8
 
@@ -52,8 +76,9 @@ class FinalizedBlockCache:
     Invalidate and retry a *read* once if the provider rejects cached state.
     """
 
-    def __init__(self, url):
+    def __init__(self, url, on_recovered=None):
         self.url = url
+        self.on_recovered = on_recovered
         self.height = None
         self.timestamp = None
         self.fetched_at = 0.0
@@ -73,7 +98,7 @@ class FinalizedBlockCache:
             self.uses += 1
             return self.height, True
         self.invalidate()
-        block = rpc(self.url, 'eth_getBlockByNumber', ['finalized', False])
+        block = retry_rpc_read(self.url, 'eth_getBlockByNumber', ['finalized', False], self.on_recovered)
         if not isinstance(block, dict):
             raise RemoteError('RPC не поддерживает finalized. Укажите другой RPC.')
         try:
@@ -106,9 +131,9 @@ def finalized_asset_sample(cache, w, asset, block_col):
             return height, None
         try:
             if asset == 'USDT':
-                amount = usdt_balance(rpc, cache.url, w['address'], hex(height))
+                amount = usdt_balance(lambda url, method, params: retry_rpc_read(url, method, params, cache.on_recovered), cache.url, w['address'], hex(height))
             else:
-                raw = rpc(cache.url, 'eth_getBalance', [w['address'], hex(height)])
+                raw = retry_rpc_read(cache.url, 'eth_getBalance', [w['address'], hex(height)], cache.on_recovered)
                 if not isinstance(raw, str) or not raw.startswith('0x'):
                     raise RemoteError('RPC вернул некорректный баланс.')
                 amount = int(raw, 16)
@@ -134,6 +159,13 @@ def check_once():
         assets = ['BNB', 'USDT'] if cfg['usdt_enabled'] else ['BNB']
         remaining = {(w['id'], asset): w for w in wallets for asset in assets}
         asset_errors = {}
+        # Per-cycle counts: asset attempts, successful checks, failures and
+        # read timeouts recovered before changing endpoints.
+        rpc_stats = [{'rpc': index + 1, 'host': __import__('urllib.parse', fromlist=['urlsplit']).urlsplit(url).hostname or 'unknown',
+                      'attempts': 0, 'success': 0, 'errors': 0, 'retry_recovered': 0,
+                      'failover_recovered': 0, 'skipped': False}
+                     for index, url in enumerate(cfg['rpc_urls'])]
+        set_status(rpc_cycle_stats=rpc_stats)
 
         last_error = 'RPC недоступен.'
         used = None
@@ -147,22 +179,27 @@ def check_once():
             key = hashlib.sha256(url.encode()).hexdigest()[:16]
             health = rpc_health.get(key, {})
             if health.get('until', 0) > time.time():
+                rpc_stats[index]['skipped'] = True
                 continue
             consecutive = 0
+            provider_stats = rpc_stats[index]
+            def recovered():
+                provider_stats['retry_recovered'] += 1
             try:
                 heartbeat()
-                if int(rpc(url, 'eth_chainId', []), 16) != 56:
+                if int(retry_rpc_read(url, 'eth_chainId', [], recovered), 16) != 56:
                     raise RemoteError('RPC подключён не к BSC mainnet (chain ID 56).')
                 token_verified = False
-                finalized_cache = FinalizedBlockCache(url)
+                finalized_cache = FinalizedBlockCache(url, recovered)
                 for (wid, asset), w in list(remaining.items()):
                     balance_col, block_col, checked_col, error_col = ASSET_FIELDS[asset]
                     if stop.is_set():
                         break
                     heartbeat()
+                    provider_stats['attempts'] += 1
                     try:
                         if asset == 'USDT' and not token_verified:
-                            usdt_decimals(rpc, url)
+                            usdt_decimals(lambda endpoint, method, params: retry_rpc_read(endpoint, method, params, recovered), url)
                             token_verified = True
                         height, amount = finalized_asset_sample(finalized_cache, w, asset, block_col)
                         if amount is None:
@@ -173,11 +210,16 @@ def check_once():
                         consecutive = 0
                         rpc_health[key] = {'failures': 0, 'until': 0}
                         remaining.pop((wid, asset))
+                        provider_stats['success'] += 1
+                        if (wid, asset) in asset_errors:
+                            provider_stats['failover_recovered'] += 1
+                            asset_errors.pop((wid, asset), None)
                         used = index + 1
                         set_status(cycle_done=len(wallets)*len(assets)-len(remaining), cycle_total=len(wallets)*len(assets))
                     except (RemoteError, ValueError, KeyError, TypeError) as exc:
                         last_error = str(exc) if isinstance(exc, RemoteError) else 'Некорректный ответ RPC.'
                         asset_errors[(wid, asset)] = last_error
+                        provider_stats['errors'] += 1
                         consecutive += 1
                         if consecutive >= 3:
                             failures = min(health.get('failures', 0) + 1, 5)
@@ -191,7 +233,7 @@ def check_once():
                 last_error = str(exc) if isinstance(exc, RemoteError) else 'Некорректный ответ RPC.'
                 failures = min(health.get('failures', 0) + 1, 5)
                 rpc_health[key] = {'failures': failures, 'until': time.time()+min(300,15*2**failures)}
-            set_status(rpc_health=rpc_health, cycle_done=len(wallets)*len(assets)-len(remaining), cycle_total=len(wallets)*len(assets))
+            set_status(rpc_cycle_stats=rpc_stats, rpc_health=rpc_health, cycle_done=len(wallets)*len(assets)-len(remaining), cycle_total=len(wallets)*len(assets))
             if not remaining:
                 break
         # SIGTERM during a deployment is not a failed RPC check. Preserve the
@@ -206,7 +248,7 @@ def check_once():
                               (asset_errors.get((wid, asset), last_error), wid))
         if not remaining:
             set_status(last_full_cycle=time.time())
-        set_status(last_cycle=time.time(), error=('; '.join(sorted({asset for _, asset in remaining})) + ': ' + last_error) if remaining else None,
+        set_status(rpc_cycle_stats=rpc_stats, last_cycle=time.time(), error=('; '.join(sorted({asset for _, asset in remaining})) + ': ' + last_error) if remaining else None,
                    rpc_index=used, wallet_count=len(wallets), failed=len(remaining))
     finally:
         set_status(running=False, last_cycle_duration=time.time()-started)
