@@ -1,6 +1,7 @@
 'use strict';
 let operationsPolling=false, currentOutboundIP=null;
 let dismissedIPWarning = null;
+let currentIPChangeKey = null;
 const dismissedIPStorageKey = 'bnb-monitor-dismissed-ip-change-v1';
 try { dismissedIPWarning = localStorage.getItem(dismissedIPStorageKey); } catch {}
 function changedIPWarningKey(ip) {
@@ -19,6 +20,7 @@ function renderOperations(data){
  const ip=data.ip||{};currentOutboundIP=ip.current;
  $('outbound-ip').textContent=`Прямой внешний IPv4: ${ip.current||'—'} · сохранённый: ${ip.expected||'—'} · ${date(ip.checked)}${ip.error?' · '+ip.error:''}`;
  const ipChangeKey=changedIPWarningKey(ip);
+ currentIPChangeKey=ipChangeKey;
  $('ip-warning').hidden=!ip.changed||!!(ipChangeKey && dismissedIPWarning===ipChangeKey);
  $('ip-warning-text').textContent=`Внешний IP изменился: ${ip.expected} → ${ip.current}. Проверьте разрешённые IP API-ключа Binance. Приложение не меняет список доступа биржи.`;
  $('ip-acknowledge').hidden=!ip.changed||!!ip.error;
@@ -38,15 +40,10 @@ $('diagnostics-check').onclick=async()=>{
  try{await api('diagnostics','POST',{});toast('Проверка подключений запрошена.');}catch(e){toast(e.message,true);$('diagnostics-check').disabled=false;}
 };
 $('ip-warning-dismiss').onclick=()=>{
- const ip=currentOutboundIP;
- // Dismiss only the current warning in this browser. Never change the
- // expected IP or Binance permissions; a *new* change will show again.
- const message=$('ip-warning-text').textContent;
- const match=message.match(/^Внешний IP изменился: (.+?) → (.+?)\\./);
- const key=match ? match[1]+' → '+match[2] : null;
- if(!key || !ip)return;
- dismissedIPWarning=key;
- try { localStorage.setItem(dismissedIPStorageKey, key); } catch {}
+ if(!currentIPChangeKey)return;
+ // UI-only acknowledgement: never modifies expected IP or Binance permissions.
+ dismissedIPWarning=currentIPChangeKey;
+ try { localStorage.setItem(dismissedIPStorageKey, currentIPChangeKey); } catch {}
  $('ip-warning').hidden=true;
 };
 $('ip-acknowledge').onclick=async()=>{
