@@ -28,7 +28,7 @@
     <p class="small"><a href="https://coinmarketcap.com/currencies/bnb/" target="_blank" rel="noopener noreferrer">Курс BNB · CoinMarketCap ↗</a> · <span id="price-status">Ожидаем курс</span></p>
     <div id="rpc-error" class="warning" hidden></div>
     <p class="notice">ⓘ Отслеживаем <strong>изменение баланса</strong>, не каждую транзакцию. Поступление и списание между проверками могут взаимно скрыться. Первый баланс — точка отсчёта, без уведомления.</p>
-    <p id="ip-warning" class="warning" hidden></p>
+    <div id="ip-warning" class="warning ip-warning" hidden><span id="ip-warning-text"></span><button id="ip-warning-dismiss" type="button" class="ip-warning-dismiss" aria-label="Закрыть предупреждение об изменении IP" title="Скрыть это предупреждение">×</button></div>
     <nav class="tabs"><button class="tab active" data-tab="wallets">Кошельки</button><button class="tab" data-tab="binance">Биржа Binance</button><button class="tab" data-tab="gate">Биржа Gate</button><button class="tab" data-tab="bybit">Биржа Bybit</button><button class="tab" data-tab="swaps">Обмен BNB / USDT</button><button class="tab" data-tab="generator">Генератор кошельков</button><button class="tab" data-tab="history">История изменений</button><button class="tab" data-tab="withdrawals">Журнал операций</button><button class="tab" data-tab="settings">Настройки</button></nav>
     <section id="tab-wallets">
       <div class="card add-card"><div><h2>Добавить кошельки</h2><p class="muted small">Один адрес на строку. Можно добавить название через пробел.</p></div><form id="wallet-form"><textarea id="addresses" rows="3" placeholder="0x… Основной кошелёк&#10;0x… Резервный" required spellcheck="false"></textarea><button type="submit">+ Добавить адреса</button></form></div>
