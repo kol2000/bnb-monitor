@@ -2,6 +2,7 @@
 import json
 import re
 import socket
+from decimal import Decimal, InvalidOperation
 import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
@@ -37,7 +38,7 @@ def fetch_rows(cfg):
     url = f"https://sheets.googleapis.com/v4/spreadsheets/{cfg['sheets_id']}/values/{cell_range}?valueRenderOption=FORMATTED_VALUE"
     try:
         req = Request(url, headers={'Authorization': 'Bearer ' + creds.token})
-        with urlopen(req, timeout=20) as response:
+        with urlopen(req, timeout=20 if is_read else 60) as response:
             raw = response.read(2_000_001)
         if len(raw) > 2_000_000:
             raise RemoteError('Ответ Google слишком большой. Используйте отдельную вкладку с адресами.')
@@ -145,6 +146,10 @@ def sync_once():
     except Exception:
         set_status(sheets_error='Ошибка синхронизации Google. Проверьте доступность диска и настройки.')
 
+class WriteOutcomeUnknown(RemoteError):
+    """Write may have reached Google; read back instead of resending."""
+
+
 def export_request(cfg, token, suffix, payload=None):
     """Read-only requests may be retried; a Google Sheets write NEVER is.
 
@@ -195,7 +200,8 @@ def export_request(cfg, token, suffix, payload=None):
             else:
                 kind = 'недоступна сеть'
             action = 'прочитать' if is_read else 'записать'
-            raise RemoteError(f'Не удалось {action} Google Таблицу: {kind}.') from None
+            error_type = RemoteError if is_read else WriteOutcomeUnknown
+            raise error_type(f'Не удалось {action} Google Таблицу: {kind}. Результат записи неизвестен.' if not is_read else f'Не удалось {action} Google Таблицу: {kind}.') from None
         except RemoteError:
             raise
         except (ValueError, UnicodeError):
@@ -224,10 +230,42 @@ def balance_updates(header, rows, balances, tab, asset='BNB'):
                             'values': [[float(bnb(balances[address]))]]})
     return updates
 
+EXPORT_BATCH_SIZE = 100
+
+
+def confirm_written_values(cfg, token, updates):
+    """Read back numeric cells after an ambiguous Sheets write response.
+
+    Never retry a write. A false or unavailable readback leaves its outcome
+    unknown, so the next normal export cycle handles it.
+    """
+    suffix = 'values:batchGet?' + '&'.join(
+        'ranges=' + quote(update['range'], safe='') for update in updates
+    ) + '&valueRenderOption=UNFORMATTED_VALUE'
+    response = export_request(cfg, token, suffix)
+    ranges = response.get('valueRanges')
+    if not isinstance(ranges, list) or len(ranges) != len(updates):
+        return False
+    for original, actual in zip(updates, ranges):
+        cells = actual.get('values', [])
+        if not cells or not cells[0]:
+            return False
+        value = cells[0][0]
+        if isinstance(value, bool) or not isinstance(value, (float, int)):
+            return False
+        try:
+            if Decimal(str(value)) != Decimal(str(original['values'][0][0])):
+                return False
+        except (ValueError, InvalidOperation):
+            return False
+    return True
+
+
 def export_balances(cycle_started):
     cfg = settings()
     if not cfg['sheets_enabled']:
         return
+    set_status(sheets_export_attempt=time.time(), sheets_export_last_count=0)
     try:
         if cfg['sheets_tab'] != 'bnb кошельки':
             raise RemoteError('Запись балансов настроена только для листа «bnb кошельки».')
@@ -270,11 +308,34 @@ def export_balances(cycle_started):
         current = settings()
         if any(current[k] != cfg[k] for k in ('sheets_enabled', 'sheets_id', 'sheets_tab')):
             return
-        result = export_request(cfg, creds.token, 'values:batchUpdate',
-                                {'valueInputOption': 'RAW', 'data': data})
-        if result.get('totalUpdatedCells') != len(data):
-            raise RemoteError('Google подтвердил не все обновления балансов.')
-        set_status(sheets_export_success=time.time(), sheets_export_count=len(data), sheets_export_error='; '.join(warnings) or None)
+        completed = 0
+        for start in range(0, len(data), EXPORT_BATCH_SIZE):
+            # Abort on a changed address-to-row mapping, including between batches.
+            if export_request(cfg, creds.token, suffix) != snapshot:
+                raise RemoteError('Строки Google изменились во время записи. Остальные пакеты не отправлены.')
+            current = settings()
+            if any(current[k] != cfg[k] for k in ('sheets_enabled', 'sheets_id', 'sheets_tab')):
+                raise RemoteError('Настройки Google изменились во время записи. Остальные пакеты не отправлены.')
+            batch = data[start:start + EXPORT_BATCH_SIZE]
+            try:
+                result = export_request(cfg, creds.token, 'values:batchUpdate',
+                                        {'valueInputOption': 'RAW', 'data': batch})
+                if result.get('totalUpdatedCells') != len(batch):
+                    raise RemoteError('Google подтвердил не все обновления пакета балансов.')
+            except WriteOutcomeUnknown as exc:
+                try:
+                    confirmed = confirm_written_values(cfg, creds.token, batch)
+                except RemoteError:
+                    confirmed = False
+                if not confirmed:
+                    raise RemoteError(
+                        str(exc) + ' Проверка значений не подтвердила запись; '
+                        'повторная отправка заблокирована до следующего цикла.'
+                    ) from None
+            completed += len(batch)
+            set_status(sheets_export_last_count=completed)
+        set_status(sheets_export_success=time.time(), sheets_export_count=completed,
+                   sheets_export_error='; '.join(warnings) or None)
     except RemoteError as exc:
         set_status(sheets_export_error=str(exc))
     except Exception:
