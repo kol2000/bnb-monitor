@@ -73,12 +73,12 @@
 
     <section id="tab-archive" hidden>
       <div class="card">
-        <h2>Кандидаты на архивирование · только предварительная проверка</h2>
-        <p class="muted small">Реальная история BSC: обычные транзакции, внутренние операции и переводы токенов. Порог — 90 дней с последней найденной операции. Никакие адреса не архивируются, не удаляются из Google Sheets и не исключаются из мониторинга.</p>
+        <h2>Предварительные кандидаты · безопасный просмотр</h2>
+        <p class="muted small">Реальная история BSC: обычные транзакции, внутренние операции и переводы токенов. Просматриваем последние 90 дней, кроме недавних блоков, ещё не проиндексированных NodeReal. Кандидаты предварительные: свежие операции и возраст адреса могут быть неизвестны. Никакие адреса не архивируются, не удаляются из Google Sheets и не исключаются из мониторинга.</p>
         <p id="archive-summary" aria-live="polite">Проверки пока нет.</p>
         <button type="button" id="archive-refresh" class="secondary">Обновить список</button>
         <div class="table-wrap"><table><thead><tr><th>Кошелёк</th><th>Последняя операция</th><th>Результат</th></tr></thead><tbody id="archive-preview-items"></tbody></table></div>
-        <p class="muted small">Проверка запускается вручную на сервере: <code>sudo docker compose exec -T web python archive_preview.py scan --limit 10</code>. Сначала тестируем малую партию. «Неизвестно» не считается неактивностью. Отчёт не предназначен для автоматического отключения проверок.</p>
+        <p class="muted small">Проверка запускается вручную на сервере: <code>sudo docker compose exec -T web python archive_preview.py scan --limit 1 --requests 20</code>. Сначала тестируем малую партию. «Неизвестно» не считается неактивностью. Отчёт не предназначен для автоматического отключения проверок.</p>
       </div>
     </section>
     <section id="tab-binance" hidden>
