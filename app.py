@@ -395,6 +395,21 @@ def state():
             'total_usd': usd(total, price), 'price': {'bnb_usd': price, 'updated': price_at,
             'stale': price_stale, 'error': status.get('price_error'), 'source': SOURCE}}
 
+@app.get('/api/archive-preview')
+def archive_preview_state():
+    # Preview only: never change a wallet's monitoring or archival status.
+    import archive_preview
+    items = archive_preview.report()
+    with db() as c:
+        total = c.execute('SELECT COUNT(*) FROM wallets').fetchone()[0]
+    return {
+        'items': items, 'total': total, 'checked': len(items),
+        'candidates': sum(item['decision'] == 'candidate' for item in items),
+        'unknown': sum(item['decision'] == 'unknown' for item in items),
+        'mode': 'preview-only'
+    }
+
+
 @app.get('/api/wallets/<int:wid>')
 def wallet_detail(wid):
     current = state()
