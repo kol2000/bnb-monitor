@@ -111,3 +111,8 @@ dialog .secondary{background:transparent;border-color:#34404f;color:#edf2f7}
 
 #exchange-purchase-dialog .binance-address{overflow-wrap:anywhere}
 #exchange-purchase-dialog .save-bar{position:sticky;bottom:-24px;background:#151b23;padding:16px 0;margin-bottom:0}
+
+/* The IP-change notice can be dismissed without modifying Binance API permissions. */
+.ip-warning { position: relative; padding-right: 3.1rem; }
+.ip-warning-dismiss { position: absolute; top: .35rem; right: .5rem; width: 2rem; height: 2rem; padding: 0; border: 0; background: transparent; color: inherit; font-size: 1.6rem; line-height: 1; cursor: pointer; }
+.ip-warning-dismiss:hover, .ip-warning-dismiss:focus-visible { outline: 1px solid currentColor; border-radius: .3rem; }
