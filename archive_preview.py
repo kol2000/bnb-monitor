@@ -298,15 +298,23 @@ def step(wallet, row):
     return 'scanning'
 
 
-def scan(limit=1, requests=20, sleeper=time.sleep, wallet_id=None):
+def scan(limit=1, requests=20, sleeper=time.sleep, wallet_id=None, refresh_completed=False):
     """Bounded manual execution; unfinished wallets resume at their checkpoint."""
     if not 1 <= limit <= 10 or not 1 <= requests <= 100:
         raise ValueError('Use --limit 1..10 and --requests 1..100')
     if wallet_id is not None and (not isinstance(wallet_id, int) or wallet_id < 1):
         raise ValueError('Use --wallet-id with a positive integer')
-    tip, tip_stamp = safe_tip()
     now = time.time()
-    cutoff = find_cutoff(tip,now)
+    bounds = None
+
+    def fresh_bounds():
+        # Resuming a checkpoint needs no head/cutoff RPC calls. New wallets in
+        # this bounded batch share one freshly verified 90-day boundary.
+        nonlocal bounds
+        if bounds is None:
+            tip, stamp = safe_tip()
+            bounds = (tip, stamp, find_cutoff(tip, time.time()))
+        return bounds
     used = 0
     last_error = None
     completed = {'active':0,'candidate':0,'unknown':0,'failed':0}
@@ -336,8 +344,8 @@ def scan(limit=1, requests=20, sleeper=time.sleep, wallet_id=None):
                        AND p.cutoff_block IS NOT NULL
                        AND p.tip_block IS NOT NULL
                        AND p.direction IN (0,1))
-                   OR p.address!=w.address
-                   OR (p.decision IN ('active','candidate','unknown')
+                   OR p.address!=w.address OR p.scan_method!='count'
+                   OR (? AND p.decision IN ('active','candidate','unknown')
                        AND p.checked_at<?)
                 ORDER BY
                     CASE WHEN p.decision='scanning' OR
@@ -348,8 +356,9 @@ def scan(limit=1, requests=20, sleeper=time.sleep, wallet_id=None):
                         (p.decision='unknown' AND
                          p.detail='Ошибка NodeReal; сканирование не подтверждено')
                         THEN COALESCE(p.requests,0) ELSE 0 END DESC,
+                    CASE WHEN p.wallet_id IS NULL OR p.address!=w.address THEN 0 ELSE 1 END,
                     COALESCE(p.checked_at,0),w.id
-                LIMIT ?""", (now-86400,limit))]
+                LIMIT ?""", (bool(refresh_completed),now-86400,limit))]
 
     for wallet in wallets:
         with db() as conn:
@@ -359,6 +368,7 @@ def scan(limit=1, requests=20, sleeper=time.sleep, wallet_id=None):
             if row is not None and row['scan_method'] != 'count':
                 # Transfer-list absence was not independently validated. Recheck
                 # from tip using the count API before making any candidate claim.
+                tip, tip_stamp, cutoff = fresh_bounds()
                 start_wallet(conn,wallet,tip,tip_stamp,cutoff)
                 row = conn.execute('SELECT * FROM archive_activity_preview WHERE wallet_id=?',
                                    (wallet['id'],)).fetchone()
@@ -371,6 +381,7 @@ def scan(limit=1, requests=20, sleeper=time.sleep, wallet_id=None):
                 conn.execute('UPDATE archive_activity_preview SET decision=?,detail=? WHERE wallet_id=?',
                              ('scanning','Повторная попытка после ошибки NodeReal',wallet['id']))
             elif row is None or row['address'] != wallet['address'] or row['decision']!='scanning':
+                tip, tip_stamp, cutoff = fresh_bounds()
                 start_wallet(conn,wallet,tip,tip_stamp,cutoff)
                 row = conn.execute('SELECT * FROM archive_activity_preview WHERE wallet_id=?',
                                    (wallet['id'],)).fetchone()
@@ -427,9 +438,11 @@ def main():
     parser.add_argument('--requests',type=int,default=20)
     parser.add_argument('--wallet-id',type=int,default=None,
                         help='Select a specific existing wallet (does not archive it)')
+    parser.add_argument('--refresh-completed',action='store_true',
+                        help='Also recheck completed results older than one day; default finishes first pass')
     args=parser.parse_args()
     if args.action == 'scan':
-        print(json.dumps(scan(args.limit,args.requests,wallet_id=args.wallet_id),ensure_ascii=False))
+        print(json.dumps(scan(args.limit,args.requests,wallet_id=args.wallet_id,refresh_completed=args.refresh_completed),ensure_ascii=False))
     else:
         for row in report():
             when = (datetime.fromtimestamp(row['last_activity'],timezone.utc).isoformat()

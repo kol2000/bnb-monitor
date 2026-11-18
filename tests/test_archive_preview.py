@@ -79,6 +79,58 @@ class ArchivePreviewTests(unittest.TestCase):
             self.assertEqual(x['cursor_block'],9998)
             self.assertEqual(x['requests'],2)
 
+    def test_resume_needs_no_boundary_requests(self):
+        with app.db() as c:
+            wallet=dict(c.execute('SELECT * FROM wallets').fetchone())
+            preview.start_wallet(c,wallet,134310220,time.time(),117089039)
+            c.execute("UPDATE archive_activity_preview SET cursor_block=131610193, direction=1, requests=200")
+        with patch.object(preview,'safe_tip',side_effect=AssertionError('unneeded tip')), \
+             patch.object(preview,'find_cutoff',side_effect=AssertionError('unneeded cutoff')), \
+             patch.object(preview,'rpc',return_value='0x0') as rpc:
+            preview.scan(requests=1,sleeper=lambda _:None)
+        self.assertEqual(rpc.call_args.args[1][0]['toBlock'],hex(131610193))
+        with app.db() as c:
+            row=c.execute('SELECT * FROM archive_activity_preview').fetchone()
+            self.assertEqual(row['requests'],201)
+            self.assertEqual(row['direction'],1)
+            self.assertEqual(row['cursor_block'],131510192)
+            self.assertEqual(row['cutoff_block'],117089039)
+
+    def test_completed_results_are_not_automatically_restarted(self):
+        for state in ('active','candidate','unknown'):
+            with self.subTest(state=state):
+                with app.db() as c:
+                    wallet=dict(c.execute('SELECT * FROM wallets').fetchone())
+                    preview.start_wallet(c,wallet,210000,time.time(),1)
+                    c.execute("UPDATE archive_activity_preview SET decision=?,checked_at=?",(state,time.time()-172800))
+                with patch.object(preview,'rpc',side_effect=AssertionError('no network')):
+                    r=preview.scan(requests=1)
+                self.assertEqual(r['wallets_selected'],0)
+                self.assertEqual(preview.report()[0]['decision'],state)
+
+    def test_refresh_completed_is_explicit(self):
+        with app.db() as c:
+            wallet=dict(c.execute('SELECT * FROM wallets').fetchone())
+            preview.start_wallet(c,wallet,210000,time.time(),1)
+            c.execute("UPDATE archive_activity_preview SET decision='active',checked_at=?",(time.time()-172800,))
+        with patch.object(preview,'safe_tip',return_value=(310000,time.time())), \
+             patch.object(preview,'find_cutoff',return_value=10), \
+             patch.object(preview,'rpc',return_value='0x1'):
+            r=preview.scan(requests=1,refresh_completed=True)
+        self.assertEqual(r['active'],1)
+        with app.db() as c:
+            self.assertEqual(c.execute('SELECT tip_block FROM archive_activity_preview').fetchone()[0],310000)
+
+    def test_batch_shares_boundary_for_new_wallets(self):
+        self.fixture.post('wallets',{'wallets':[{'address':base.B,'name':'Second'}]})
+        with patch.object(preview,'safe_tip',return_value=(210000,time.time())) as tip, \
+             patch.object(preview,'find_cutoff',return_value=1) as cutoff, \
+             patch.object(preview,'rpc',return_value='0x1'):
+            r=preview.scan(limit=2,requests=2,sleeper=lambda _:None)
+        self.assertEqual(r['active'],2)
+        tip.assert_called_once()
+        cutoff.assert_called_once()
+
     def test_scan_failure_never_marks_candidate(self):
         with patch.object(preview,'safe_tip',return_value=(100,time.time())),\
              patch.object(preview,'find_cutoff',return_value=90),\
