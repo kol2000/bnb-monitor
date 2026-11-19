@@ -338,7 +338,7 @@ def reconcile(api,j):
     cleanup(api,j)
 
 
-def main():
+def main(*, allow_empty=False):
     os.umask(0o077)
     import fcntl
     with (DATA/'archive-verification.lock').open('a') as lock:
@@ -369,7 +369,9 @@ def main():
             if good:
                 selected[row['wallet_id']]=row['address'].lower(); checked[row['wallet_id']]=time.time()
             print(f"Проверено {n}/{len(rows)}: #{row['wallet_id']} — "+('включён' if good else 'пропущен: '+status),flush=True)
-        if not selected: raise RemoteError('Нет кошельков, прошедших актуальную проверку. Таблица не изменена.')
+        if not selected:
+            if allow_empty: return
+            raise RemoteError('Нет кошельков, прошедших актуальную проверку. Таблица не изменена.')
         if time.time()-min(checked.values())>3600: raise RemoteError('Проверка заняла более часа; перенос остановлен из-за давности первых результатов.')
         meta=api.metadata(); sp,dp=properties(meta)
         src=api.rows(SOURCE,sp['gridProperties']['columnCount']); dst=api.rows(DEST,dp['gridProperties']['columnCount'])
