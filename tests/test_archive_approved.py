@@ -91,3 +91,38 @@ class ApprovedMoveTests(unittest.TestCase):
         self.assertEqual(m.normalize([['a','','b',''],[],[]]),[['a','','b']])
 
 if __name__=='__main__':unittest.main()
+
+class CleanupTests(unittest.TestCase):
+    def meta(self):
+        return {'sheets':[{'properties':{'sheetId':1,'title':m.SOURCE,'gridProperties':{'columnCount':8}}},
+                          {'properties':{'sheetId':2,'title':m.DEST,'gridProperties':{'columnCount':8}}},
+                          {'properties':{'sheetId':3,'title':'backup-active-abc'}},
+                          {'properties':{'sheetId':4,'title':'backup-archive-abc'}},
+                          {'properties':{'sheetId':5,'title':'backup-active-other'}}]}
+    def test_blank_runs_deleted_descending_but_headers_and_formulas_kept(self):
+        src=[['email','address'],[],['name','addr'],[],[],['=SUM(A1:A3)'],['',''],['next','addr2']]
+        req,after,n,b=m.cleanup_plan(self.meta(),src,'abc')
+        ranges=[r['deleteDimension']['range'] for r in req if 'deleteDimension' in r]
+        self.assertEqual([(r['startIndex'],r['endIndex']) for r in ranges],[(6,7),(3,5)])
+        self.assertEqual(n,3);self.assertEqual(b,2)
+        self.assertEqual(after,[src[0],[],src[2],src[5],src[7]])
+        self.assertEqual([r['deleteSheet']['sheetId'] for r in req if 'deleteSheet' in r],[3,4])
+    def test_nonempty_hidden_column_and_empty_formula_not_deleted(self):
+        req,after,n,b=m.cleanup_plan(self.meta(),[['header'],[],['','','note'],['=""']],'abc')
+        self.assertEqual(n,0)
+    def test_missing_backups_allowed(self):
+        meta=self.meta();meta['sheets']=meta['sheets'][:2]
+        self.assertEqual(m.cleanup_plan(meta,[['header'],[],['x']],'abc')[3],0)
+    def test_signature_allows_formula_references_to_shift_not_literal_data(self):
+        self.assertEqual(m.content_signature([['secret','=A9']]),m.content_signature([['secret','=A8']]))
+        self.assertNotEqual(m.content_signature([['secret','=A9']]),m.content_signature([['changed','=A8']]))
+        self.assertNotEqual(m.content_signature([['secret','=A9']]),m.content_signature([['secret','value']]))
+    def test_completed_cleanup_does_not_call_api(self):
+        from unittest.mock import Mock
+        api=Mock();m.cleanup(api,{'state':'done','cleanup':'done'})
+        api.metadata.assert_not_called();api.request.assert_not_called()
+    def test_ambiguous_cleanup_does_not_resubmit(self):
+        from unittest.mock import Mock
+        api=Mock();api.metadata.return_value=self.meta();api.rows.return_value=[]
+        with self.assertRaises(app.RemoteError):m.cleanup(api,{'state':'done','cleanup':'submitting','job':'abc'})
+        api.request.assert_not_called()

@@ -251,6 +251,81 @@ def finish_local(j):
     print('Перенос подтверждён. В архиве и исключены из мониторинга:',len(j['selected']),flush=True)
 
 
+
+def content_signature(rows):
+    # Sheets adjusts formula references when rows are deleted. Verify every
+    # literal value and formula position without expecting old row references.
+    return digest([[['formula'] if isinstance(v,str) and v.startswith('=')
+                    else ['literal',v] for v in r] for r in normalize(rows)])
+
+
+def cleanup_plan(meta,src,job):
+    sp,dp=properties(meta)
+    # Preserve the two header/separator rows. Only genuinely empty value rows
+    # inside the populated range are removed; ="" is still a formula, not empty.
+    empty=[i for i,r in enumerate(src) if i>=2 and all(v=='' for v in r)]
+    groups=[]
+    for i in empty:
+        if groups and groups[-1][1]==i: groups[-1][1]=i+1
+        else: groups.append([i,i+1])
+    requests=[{'deleteDimension':{'range':{'sheetId':sp['sheetId'],
+        'dimension':'ROWS','startIndex':start,'endIndex':end}}}
+        for start,end in reversed(groups)]
+    names={'backup-active-'+job[:12],'backup-archive-'+job[:12]}
+    backups=[x['properties']['sheetId'] for x in meta['sheets']
+             if x['properties']['title'] in names]
+    if any(i in (sp['sheetId'],dp['sheetId']) for i in backups):
+        raise RemoteError('Неверные идентификаторы резервных листов.')
+    requests += [{'deleteSheet':{'sheetId':i}} for i in backups]
+    requests.append({'createDeveloperMetadata':{'developerMetadata':{
+        'metadataKey':'bnb_archive_cleanup','metadataValue':job,
+        'visibility':'DOCUMENT','location':{'spreadsheet':True}}}})
+    return requests,normalize([r for i,r in enumerate(src) if i not in empty]),len(empty),len(backups)
+
+
+def cleanup(api,j):
+    if j.get('state')!='done': raise RemoteError('Сначала требуется подтверждённый перенос.')
+    if j.get('cleanup')=='done':
+        print('Перенос и уборка уже выполнены. Повторных изменений нет.',flush=True)
+        return
+    meta=api.metadata(); sp,dp=properties(meta)
+    src=api.rows(SOURCE,sp['gridProperties']['columnCount'])
+    dst=api.rows(DEST,dp['gridProperties']['columnCount'])
+    marked=any(x.get('metadataKey')=='bnb_archive_cleanup' and x.get('metadataValue')==j['job']
+               for x in meta.get('developerMetadata',[]))
+    if j.get('cleanup')!='submitting':
+        if marked: raise RemoteError('Маркер уборки уже существует; требуется сверка журнала.')
+        if digest(dst)!=j['archive_after_hash']:
+            raise RemoteError('Архив изменился после переноса. Автоматическая уборка остановлена.')
+        # A stale or corrupted local state must not remove recovery sheets.
+        if any(address(r) in j['selected'].values() for r in src):
+            raise RemoteError('В рабочем листе снова есть архивированные адреса.')
+        if any(sum(address(r)==a for r in dst)!=1 for a in j['selected'].values()):
+            raise RemoteError('Не все перенесённые адреса найдены в архиве ровно один раз.')
+        requests,after,count,backups=cleanup_plan(meta,src,j['job'])
+        if api.rows(SOURCE,sp['gridProperties']['columnCount'])!=src or api.rows(DEST,dp['gridProperties']['columnCount'])!=dst or api.metadata()!=meta:
+            raise RemoteError('Таблица изменилась во время подготовки уборки.')
+        j.update(cleanup='submitting',cleanup_source_hash=content_signature(after),
+                 cleanup_archive_hash=content_signature(dst),cleanup_rows=count,cleanup_backups=backups)
+        save(j)
+        try: api.request(':batchUpdate',{'requests':requests})
+        except RemoteError: print('Сверяем уборку после потери ответа; запись не повторяется.',flush=True)
+        meta=api.metadata(); sp,dp=properties(meta)
+        src=api.rows(SOURCE,sp['gridProperties']['columnCount'])
+        dst=api.rows(DEST,dp['gridProperties']['columnCount'])
+        marked=any(x.get('metadataKey')=='bnb_archive_cleanup' and x.get('metadataValue')==j['job']
+                   for x in meta.get('developerMetadata',[]))
+    if not marked:
+        raise RemoteError('Уборка не подтверждена. Повторная отправка заблокирована, журнал сохранён.')
+    names={'backup-active-'+j['job'][:12],'backup-archive-'+j['job'][:12]}
+    if (content_signature(src)!=j['cleanup_source_hash'] or
+            content_signature(dst)!=j['cleanup_archive_hash'] or
+            any(x['properties']['title'] in names for x in meta['sheets'])):
+        raise RemoteError('Проверка содержимого после уборки не прошла. Повторная запись заблокирована.')
+    j['cleanup']='done';save(j)
+    print(f"Уборка подтверждена: пустых строк удалено {j['cleanup_rows']}, временных вкладок {j['cleanup_backups']}.",flush=True)
+
+
 def reconcile(api,j):
     meta=api.metadata()
     marker=any(m.get('metadataKey')=='bnb_archive_approved' and m.get('metadataValue')==j['job'] for m in meta.get('developerMetadata',[]))
@@ -260,6 +335,7 @@ def reconcile(api,j):
     if digest(src)!=j['source_after_hash'] or digest(dst)!=j['archive_after_hash']:
         raise RemoteError('Содержимое после переноса не совпало с планом. Резервные листы сохранены; повторная запись запрещена.')
     finish_local(j)
+    cleanup(api,j)
 
 
 def main():
@@ -275,7 +351,7 @@ def main():
             j=json.loads(JOURNAL.read_text())
             if j['spreadsheet']!=cfg['sheets_id']: raise RemoteError('Изменилась Google Таблица.')
             if j['state']=='done':
-                print('Этот перенос уже завершён. Повторная запись не выполняется.'); return
+                cleanup(api,j); return
             reconcile(api,j); return
         with db() as c:
             assert_idle(c)
