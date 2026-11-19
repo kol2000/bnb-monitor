@@ -85,6 +85,8 @@ def safe_api_error_message(message, key):
     return value[:180]
 
 
+RPC_GUARD = None  # Set by automatic archive entry point; tests/manual preview unchanged.
+
 def rpc(method, params, *, opener=urlopen):
     if method not in ('eth_chainId','eth_blockNumber','eth_getBlockByNumber','nr_getAssetTransfers','nr_getAssetTransfersCount','eth_getTransactionCount','eth_getBalance','eth_call'):
         raise ValueError('Not a permitted read-only RPC method')
@@ -97,6 +99,8 @@ def rpc(method, params, *, opener=urlopen):
     # The only retry is a safe JSON-RPC READ. A timeout never retries transfers
     # or other write operations. Keep exception URLs/API-key bytes out of logs.
     for attempt in range(2):
+        if RPC_GUARD is not None:
+            RPC_GUARD(method)
         try:
             with opener(request, timeout=20) as res:
                 data = res.read(600001)
