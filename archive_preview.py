@@ -509,10 +509,10 @@ def verify_candidate(row, *, sleeper=time.sleep):
             raise IndexerError('Invalid USDT balance response')
         usdt = int(raw, 16)
         evidence.update(bnb_wei=str(bnb), usdt_units=str(usdt))
-        if bnb or usdt:
-            return 'has_balance', 'Есть остаток BNB или USDT; оставлен для ручной проверки.', evidence
         if verification_block(head) != (stamp, block_hash):
             raise IndexerError('Verification block changed during scan')
+        if bnb or usdt:
+            return 'has_balance', 'Есть остаток BNB или USDT; оставлен для ручной проверки.', evidence
         return 'verified_snapshot', ('Активность не обнаружена до указанного блока; '
             'использование более 90 дней назад подтверждено, BNB и USDT равны нулю. '
             'Перед переносом нужна актуальная сверка.'), evidence

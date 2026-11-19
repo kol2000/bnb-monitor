@@ -38,7 +38,7 @@ def fetch_rows(cfg):
     url = f"https://sheets.googleapis.com/v4/spreadsheets/{cfg['sheets_id']}/values/{cell_range}?valueRenderOption=FORMATTED_VALUE"
     try:
         req = Request(url, headers={'Authorization': 'Bearer ' + creds.token})
-        with urlopen(req, timeout=20 if is_read else 60) as response:
+        with urlopen(req, timeout=20) as response:
             raw = response.read(2_000_001)
         if len(raw) > 2_000_000:
             raise RemoteError('Ответ Google слишком большой. Используйте отдельную вкладку с адресами.')
