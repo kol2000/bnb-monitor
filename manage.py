@@ -67,7 +67,10 @@ def backup():
     folder.mkdir(mode=0o700)
     running = run(['docker','compose','ps','--services','--status','running'], True).split()
     ids = run(['docker','compose','ps','-aq','web'], True).split()
-    # compose ps may include one-off archive containers with service=web.\n    ids = [ident for ident in ids if str(inspect_container(ident).get('Config', {}).get('Labels', {}).get('com.docker.compose.oneoff', 'false')).lower() != 'true']\n    if len(ids) != 1:\n        raise RuntimeError('Ожидался один основной контейнер web для резервной копии; найдено: '+str(len(ids)))
+    # compose ps may include one-off archive containers with service=web.
+    ids = [ident for ident in ids if str(inspect_container(ident).get('Config', {}).get('Labels', {}).get('com.docker.compose.oneoff', 'false')).lower() != 'true']
+    if len(ids) != 1:
+        raise RuntimeError('Ожидался один основной контейнер web для резервной копии; найдено: '+str(len(ids)))
     container = inspect_container(ids[0])
     volumes = [m for m in container['Mounts'] if m['Destination']=='/data' and m['Type']=='volume']
     if len(volumes)!=1:
