@@ -137,12 +137,12 @@ class Sheets:
             raise RemoteError('Google: запрос не подтверждён; секреты и ответ API не выводятся.') from None
     def metadata(self):
         return self.request('?fields=sheets(properties),developerMetadata')
-    def rows(self,title,columns):
+    def rows(self,title,columns,render="FORMULA"):
         label=''
         while columns:
             columns,rem=divmod(columns-1,26); label=chr(65+rem)+label
         rng="'"+title.replace("'","''")+"'!A:"+label
-        value=self.request('/values/'+quote(rng,safe='')+'?valueRenderOption=FORMULA')
+        value=self.request('/values/'+quote(rng,safe='')+'?valueRenderOption='+render)
         if not value.get('range') or not isinstance(value.get('values',[]),list):
             raise RemoteError('Google вернул неполный диапазон.')
         rows=normalize(value.get('values',[]))
@@ -162,8 +162,6 @@ def plan_rows(src,dst,selected):
         a=address(row)
         if a in selected.values():
             if index==0 or a in mapping: raise RemoteError('Дубликат адреса или адрес в заголовке.')
-            if any(isinstance(v,str) and v.startswith('=') for v in row):
-                raise RemoteError('В переносимой строке есть формула; автоматический перенос остановлен.')
             mapping[a]=index
     if set(mapping)!=set(selected.values()): raise RemoteError('Согласованные адреса отсутствуют в рабочем листе.')
     if any(address(r) in mapping for r in dst): raise RemoteError('Согласованный адрес уже есть в архиве; нужна сверка дубликата.')
@@ -171,7 +169,33 @@ def plan_rows(src,dst,selected):
     return sorted(mapping.values())
 
 
-def requests_for(srcprop,dstprop,indices,offset,job):
+def frozen_rows(src,effective,indices):
+    result=[]
+    for i in indices:
+        row=effective[i] if i<len(effective) else []
+        if address(row)!=address(src[i]):
+            raise RemoteError('Адрес изменился при чтении значений формул.')
+        # Only formulas are replaced; literal secrets/text are preserved exactly.
+        values=[]
+        for col,value in enumerate(src[i]):
+            if isinstance(value,str) and value.startswith('='):
+                value=row[col] if col<len(row) else ''
+            values.append(value)
+        result.append(normalize([values])[0] if any(v!='' for v in values) else [])
+    return result
+
+
+def cell_value(value):
+    # Typed values prevent a calculated string beginning '=' becoming a formula.
+    if value=='': return {}
+    if isinstance(value,bool): key='boolValue'
+    elif isinstance(value,(int,float)): key='numberValue'
+    elif isinstance(value,str): key='stringValue'
+    else: raise RemoteError('Неподдерживаемое значение ячейки.')
+    return {'userEnteredValue':{key:value}}
+
+
+def requests_for(srcprop,dstprop,indices,offset,job,frozen):
     source=srcprop['sheetId']; target=dstprop['sheetId']
     width=srcprop['gridProperties']['columnCount']
     # Backups and all moves form ONE atomic Google batch.
@@ -184,9 +208,15 @@ def requests_for(srcprop,dstprop,indices,offset,job):
         requests.append({'copyPaste':{'source':{'sheetId':source,'startRowIndex':index,'endRowIndex':index+1,'startColumnIndex':0,'endColumnIndex':width},
            'destination':{'sheetId':target,'startRowIndex':offset+n,'endRowIndex':offset+n+1,'startColumnIndex':0,'endColumnIndex':width},
            'pasteType':'PASTE_NORMAL'}})
-    # Descending order avoids index shifts. Backups include all original cells.
-    for index in sorted(indices,reverse=True):
-        requests.append({'deleteDimension':{'range':{'sheetId':source,'dimension':'ROWS','startIndex':index,'endIndex':index+1}}})
+        requests.append({'updateCells':{
+            'range':{'sheetId':target,'startRowIndex':offset+n,'endRowIndex':offset+n+1,'startColumnIndex':0,'endColumnIndex':width},
+            'rows':[{'values':[cell_value(v) for v in frozen[n]]}],
+            'fields':'userEnteredValue'}})
+    # Clear values without deleting rows: unrelated formulas retain their references.
+    for index in indices:
+        requests.append({'updateCells':{
+            'range':{'sheetId':source,'startRowIndex':index,'endRowIndex':index+1,'startColumnIndex':0,'endColumnIndex':width},
+            'rows':[], 'fields':'userEnteredValue'}})
     requests.append({'createDeveloperMetadata':{'developerMetadata':{
         'metadataKey':'bnb_archive_approved','metadataValue':job,
         'visibility':'DOCUMENT','location':{'spreadsheet':True}}}})
@@ -268,9 +298,12 @@ def main():
         meta=api.metadata(); sp,dp=properties(meta)
         src=api.rows(SOURCE,sp['gridProperties']['columnCount']); dst=api.rows(DEST,dp['gridProperties']['columnCount'])
         indices=plan_rows(src,dst,selected)
+        effective=api.rows(SOURCE,sp['gridProperties']['columnCount'],render='UNFORMATTED_VALUE')
+        frozen=frozen_rows(src,effective,indices)
         job=uuid.uuid4().hex
-        aftersrc=normalize([r for i,r in enumerate(src) if i not in indices]); afterdst=dst+[src[i] for i in indices]
-        payload={'requests':requests_for(sp,dp,indices,len(dst),job)}
+        aftersrc=normalize([[] if i in indices else r for i,r in enumerate(src)])
+        afterdst=normalize(dst+frozen)
+        payload={'requests':requests_for(sp,dp,indices,len(dst),job,frozen)}
         # Last-minute re-read before atomic write. Do not edit Sheets during this job.
         if src!=api.rows(SOURCE,sp['gridProperties']['columnCount']) or dst!=api.rows(DEST,dp['gridProperties']['columnCount']):
             raise RemoteError('Таблица изменена во время подготовки; ничего не отправлено.')

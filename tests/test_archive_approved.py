@@ -25,17 +25,31 @@ class ApprovedMoveTests(unittest.TestCase):
         a=m.APPROVED[380];row=['test',a,'SECRET'];header=['email','address']
         for src,dst in [([header],[header]),([header,row,row],[header]),([header,row],[header,row])]:
             with self.assertRaises(app.RemoteError):m.plan_rows(src,dst,{380:a})
-    def test_formula_rows_are_not_moved(self):
+    def test_formulas_freeze_but_seed_and_address_are_preserved(self):
         a=m.APPROVED[380]
-        with self.assertRaises(app.RemoteError):m.plan_rows([['header'],['test',a,'=A1']],[['header']],{380:a})
+        src=[['header'],['test',a,'SECRET','=SUM(D3:D9)','=A1','']]
+        values=[['header'],['test',a,'SECRET',123,'=literal','']]
+        self.assertEqual(m.plan_rows(src,[['header']],{380:a}),[1])
+        self.assertEqual(m.frozen_rows(src,values,[1]),[['test',a,'SECRET',123,'=literal']])
+        self.assertEqual(m.cell_value('=literal'),{'userEnteredValue':{'stringValue':'=literal'}})
+        self.assertEqual(m.cell_value(False),{'userEnteredValue':{'boolValue':False}})
+        self.assertEqual(m.cell_value(0),{'userEnteredValue':{'numberValue':0}})
+
+    def test_changed_effective_address_is_rejected(self):
+        with self.assertRaises(app.RemoteError):
+            m.frozen_rows([['a',m.APPROVED[380]]],[['a',m.APPROVED[381]]],[0])
     def test_atomic_plan_backs_up_copies_all_columns_then_deletes_descending(self):
-        requests=m.requests_for(self.sp,self.dp,[1,4],3,'abc')
+        requests=m.requests_for(self.sp,self.dp,[1,4],3,'abc',[['one'],['two']])
         self.assertIn('duplicateSheet',requests[0]); self.assertIn('duplicateSheet',requests[1])
         copies=[r['copyPaste'] for r in requests if 'copyPaste' in r]
         self.assertEqual([r['destination']['startRowIndex'] for r in copies],[3,4])
         self.assertEqual([r['source']['endColumnIndex'] for r in copies],[8,8])
-        deletes=[r['deleteDimension']['range']['startIndex'] for r in requests if 'deleteDimension' in r]
-        self.assertEqual(deletes,[4,1])
+        self.assertFalse(any('deleteDimension' in r for r in requests))
+        clears=[r['updateCells'] for r in requests if 'updateCells' in r and r['updateCells']['range']['sheetId']==1]
+        self.assertEqual([r['range']['startRowIndex'] for r in clears],[1,4])
+        self.assertTrue(all(r['rows']==[] and r['fields']=='userEnteredValue' for r in clears))
+        writes=[r['updateCells'] for r in requests if 'updateCells' in r and r['updateCells']['range']['sheetId']==2]
+        self.assertEqual(writes[0]['rows'][0]['values'],[{'userEnteredValue':{'stringValue':'one'}}])
         self.assertEqual(requests[-1]['createDeveloperMetadata']['developerMetadata']['metadataValue'],'abc')
     def test_no_metadata_after_timeout_never_resends(self):
         from unittest.mock import Mock
