@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from app import DATA, db
+from app import DATA, db, USDT_CONTRACT
 
 API_BASE = 'https://bsc-mainnet.nodereal.io/v1/'
 KINDS = ['external', 'internal', '20', '721', '1155']
@@ -86,7 +86,7 @@ def safe_api_error_message(message, key):
 
 
 def rpc(method, params, *, opener=urlopen):
-    if method not in ('eth_chainId','eth_blockNumber','eth_getBlockByNumber','nr_getAssetTransfers','nr_getAssetTransfersCount'):
+    if method not in ('eth_chainId','eth_blockNumber','eth_getBlockByNumber','nr_getAssetTransfers','nr_getAssetTransfersCount','eth_getTransactionCount','eth_getBalance','eth_call'):
         raise ValueError('Not a permitted read-only RPC method')
     key = key_from_file()
     request = Request(API_BASE + key,
@@ -431,9 +431,151 @@ def report():
         """)]
 
 
+
+def verification_schema(conn):
+    conn.execute("""CREATE TABLE IF NOT EXISTS archive_candidate_verification (
+        wallet_id INTEGER PRIMARY KEY, address TEXT NOT NULL,
+        preview_tip INTEGER NOT NULL, checked_at REAL NOT NULL,
+        status TEXT NOT NULL, detail TEXT NOT NULL, evidence TEXT NOT NULL
+    )""")
+
+
+def verification_block(number):
+    value = rpc('eth_getBlockByNumber', [hex(number), False])
+    if (not isinstance(value, dict)
+            or count_result(value.get('number')) != number
+            or not re.fullmatch(r'0x[0-9a-fA-F]{64}', str(value.get('hash')))):
+        raise IndexerError('Invalid verification block')
+    stamp = count_result(value.get('timestamp'))
+    return stamp, value['hash']
+
+
+def verify_candidate(row, *, sleeper=time.sleep):
+    """Read-only snapshot verification. Never authorizes a later automatic move.
+
+    Historical nonce > 0 proves use before the cutoff (not key creation time).
+    A zero nonce is NOT proof of a new address. Keep such addresses for review.
+    """
+    evidence = {}
+    try:
+        address = row['address']
+        cutoff, old_tip = row['cutoff_block'], row['tip_block']
+        if (row['decision'] != 'candidate' or row['scan_method'] != 'count'
+                or not ADDRESS.fullmatch(address) or not isinstance(cutoff, int)
+                or not isinstance(old_tip, int) or not 0 < cutoff <= old_tip):
+            raise IndexerError('Invalid completed candidate checkpoint')
+        if count_result(rpc('eth_chainId', [])) != 56:
+            raise IndexerError('NodeReal is not BSC mainnet')
+        head = count_result(rpc('eth_blockNumber', []))
+        stamp, block_hash = verification_block(head)
+        if head < old_tip or not 0 <= time.time() - stamp <= 300:
+            raise IndexerError('Verification head is stale or behind preview')
+        # Original cutoff is older than today's 90-day threshold. Reusing it
+        # over-checks activity conservatively and does not leave a range gap.
+        cutoff_stamp = block_data(cutoff)
+        if not 0 < cutoff_stamp < time.time() - DAYS * 86400:
+            raise IndexerError('Preview cutoff does not prove a 90-day interval')
+        evidence.update(head=head, head_timestamp=stamp, head_hash=block_hash,
+                        cutoff=cutoff, cutoff_timestamp=cutoff_stamp,
+                        preview_tip=old_tip)
+        # This also catches outgoing failed transactions not indexed as transfers.
+        old_nonce = count_result(rpc('eth_getTransactionCount', [address, hex(cutoff)]))
+        nonce = count_result(rpc('eth_getTransactionCount', [address, hex(head)]))
+        evidence.update(old_nonce=old_nonce, head_nonce=nonce)
+        if nonce < old_nonce:
+            raise IndexerError('Inconsistent historical nonce')
+        if nonce > old_nonce:
+            return 'active', 'Есть исходящие транзакции после границы 90 дней.', evidence
+        # Check every block since preview, including the formerly omitted tail.
+        # Never move the target backwards to work around indexer lag.
+        for direction in DIRECTIONS:
+            low = old_tip + 1
+            while low <= head:
+                high = min(head, low + WINDOW)
+                params = {'category': KINDS, direction: address,
+                          'fromBlock': hex(low), 'toBlock': hex(high),
+                          'excludeZeroValue': False}
+                if count_result(rpc('nr_getAssetTransfersCount', [params])):
+                    return 'active', 'Обнаружена активность после предварительного сканирования.', evidence
+                low = high + 1
+                sleeper(0.5)
+        if old_nonce == 0:
+            return 'age_unknown', ('Нет подтверждения использования адреса более 90 дней назад. '
+                                   'Нулевой nonce не означает, что кошелёк новый.'), evidence
+        bnb = count_result(rpc('eth_getBalance', [address, hex(head)]))
+        raw = rpc('eth_call', [{'to': USDT_CONTRACT,
+            'data': '0x70a08231' + address[2:].lower().zfill(64)}, hex(head)])
+        if not isinstance(raw, str) or not re.fullmatch(r'0x[0-9a-fA-F]{64}', raw):
+            raise IndexerError('Invalid USDT balance response')
+        usdt = int(raw, 16)
+        evidence.update(bnb_wei=str(bnb), usdt_units=str(usdt))
+        if bnb or usdt:
+            return 'has_balance', 'Есть остаток BNB или USDT; оставлен для ручной проверки.', evidence
+        if verification_block(head) != (stamp, block_hash):
+            raise IndexerError('Verification block changed during scan')
+        return 'verified_snapshot', ('Активность не обнаружена до указанного блока; '
+            'использование более 90 дней назад подтверждено, BNB и USDT равны нулю. '
+            'Перед переносом нужна актуальная сверка.'), evidence
+    except (IndexerError, ValueError, TypeError, KeyError) as exc:
+        detail = str(exc) if isinstance(exc, IndexerError) else type(exc).__name__
+        return 'unknown', 'Проверка не подтверждена: ' + detail, evidence
+
+
+def verify_candidates(*, sleeper=time.sleep):
+    """Process all current candidates once, keeping original preview untouched."""
+    import fcntl
+    # Prevent two verification CLI processes from overwriting one another.
+    with (DATA / 'archive-verification.lock').open('a') as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise IndexerError('Candidate verification is already running') from None
+        with db() as conn:
+            schema(conn)
+            verification_schema(conn)
+            rows = [dict(r) for r in conn.execute("""
+                SELECT p.* FROM archive_activity_preview p JOIN wallets w
+                ON w.id=p.wallet_id AND w.address=p.address
+                WHERE p.decision='candidate' ORDER BY p.wallet_id""")]
+            # Invalidate previous results before any network request on a rerun.
+            for row in rows:
+                conn.execute("""INSERT OR REPLACE INTO archive_candidate_verification
+                    VALUES(?,?,?,?,?,?,?)""", (row['wallet_id'],row['address'],
+                    row['tip_block'],time.time(),'pending','Ожидает проверки','{}'))
+        totals = {}
+        for index, row in enumerate(rows, 1):
+            status, detail, evidence = verify_candidate(row, sleeper=sleeper)
+            with db() as conn:
+                current = conn.execute("""SELECT p.* FROM archive_activity_preview p
+                    JOIN wallets w ON w.id=p.wallet_id AND w.address=p.address
+                    WHERE p.wallet_id=?""", (row['wallet_id'],)).fetchone()
+                if (not current or any(current[k] != row[k] for k in
+                        ('address','decision','tip_block','cutoff_block','checked_at'))):
+                    status, detail = 'unknown', 'Кошелёк или предварительная проверка изменились.'
+                conn.execute("""UPDATE archive_candidate_verification
+                    SET checked_at=?,status=?,detail=?,evidence=? WHERE wallet_id=?""",
+                    (time.time(),status,detail,json.dumps(evidence),row['wallet_id']))
+            totals[status] = totals.get(status, 0) + 1
+            print(json.dumps({'processed':index,'total':len(rows),
+                'wallet_id':row['wallet_id'],'status':status,'detail':detail,
+                'totals':totals}, ensure_ascii=False), flush=True)
+            sleeper(0.5)
+        print('Проверка кандидатов завершена. Кошельки и Google Таблица не изменялись.', flush=True)
+        return totals
+
+
+def verification_report():
+    with db() as conn:
+        verification_schema(conn)
+        return [dict(r) for r in conn.execute("""SELECT v.wallet_id,w.name,v.address,
+            v.status,v.checked_at,v.detail,v.evidence FROM archive_candidate_verification v
+            JOIN wallets w ON w.id=v.wallet_id AND w.address=v.address
+            ORDER BY v.status,v.wallet_id""")]
+
+
 def main():
     parser = argparse.ArgumentParser(description='NodeReal BSC archive activity preview')
-    parser.add_argument('action',choices=('scan','list'))
+    parser.add_argument('action',choices=('scan','list','verify','verification-report'))
     parser.add_argument('--limit',type=int,default=1)
     parser.add_argument('--requests',type=int,default=20)
     parser.add_argument('--wallet-id',type=int,default=None,
@@ -441,7 +583,12 @@ def main():
     parser.add_argument('--refresh-completed',action='store_true',
                         help='Also recheck completed results older than one day; default finishes first pass')
     args=parser.parse_args()
-    if args.action == 'scan':
+    if args.action == 'verify':
+        verify_candidates()
+    elif args.action == 'verification-report':
+        for row in verification_report():
+            print(json.dumps(row, ensure_ascii=False))
+    elif args.action == 'scan':
         print(json.dumps(scan(args.limit,args.requests,wallet_id=args.wallet_id,refresh_completed=args.refresh_completed),ensure_ascii=False))
     else:
         for row in report():
